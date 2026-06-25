@@ -22,7 +22,7 @@ export default function About() {
         .
       </p>
       <div className="mt-8">
-        <Button to="/" variant="outline">
+        <Button to="/homepage" variant="outline">
           ← Back home
         </Button>
       </div>

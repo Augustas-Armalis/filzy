@@ -1,20 +1,24 @@
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import ComingSoon from "@/pages/ComingSoon";
 import Home from "@/pages/Home";
 import About from "@/pages/About";
 
 /*
-  HashRouter is used so client-side routing works on GitHub Pages with zero
-  server config (URLs look like filzy.site/#/about). If you'd rather have clean
-  URLs (filzy.site/about), switch to BrowserRouter and add the standard
-  GitHub Pages 404.html SPA redirect.
+  Routes:
+    /            → public "Coming soon" landing (no nav chrome)
+    /homepage    → the starter showcase (inside the shared Layout)
+    /about       → second page
+
+  HashRouter keeps client routing working on GitHub Pages with no server config.
 */
 export default function App() {
   return (
     <HashRouter>
       <Routes>
+        <Route path="/" element={<ComingSoon />} />
         <Route element={<Layout />}>
-          <Route path="/" element={<Home />} />
+          <Route path="/homepage" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route
             path="*"

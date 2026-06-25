@@ -2,21 +2,52 @@
 <html lang="en" class="scroll-smooth">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#000000" />
+
+    <!-- Primary meta -->
+    <title>Filzy</title>
     <meta
       name="description"
-      content="Filzy — a fast, modern React + Tailwind + Framer Motion starter, ready to deploy on GitHub Pages."
+      content="Send unlimited size files across devices &amp; the world"
     />
+    <meta name="application-name" content="Filzy" />
+    <meta name="apple-mobile-web-app-title" content="Filzy" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#070808" />
+    <link rel="canonical" href="https://filzy.site/" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/branding/apple-touch-icon.png" />
+    <link rel="mask-icon" href="/favicon.svg" color="#070808" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Filzy" />
-    <meta property="og:description" content="A fast, modern React + Tailwind starter." />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://filzy.site" />
+    <meta property="og:site_name" content="Filzy" />
+    <meta property="og:title" content="Filzy" />
+    <meta
+      property="og:description"
+      content="Send unlimited size files across devices &amp; the world"
+    />
+    <meta property="og:url" content="https://filzy.site/" />
+    <meta property="og:image" content="https://filzy.site/branding/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Filzy" />
+    <meta property="og:locale" content="en_US" />
 
-    <title>Filzy — Build something great</title>
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Filzy" />
+    <meta
+      name="twitter:description"
+      content="Send unlimited size files across devices &amp; the world"
+    />
+    <meta name="twitter:image" content="https://filzy.site/branding/og-image.png" />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -25,6 +56,13 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
+
+    <!-- Dark base so the "Coming soon" page never flashes white -->
+    <style>
+      html {
+        background-color: #070808;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

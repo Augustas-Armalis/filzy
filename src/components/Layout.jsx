@@ -2,20 +2,20 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/cn";
 
 const links = [
-  { to: "/", label: "Home" },
+  { to: "/homepage", label: "Home" },
   { to: "/about", label: "About" },
 ];
 
 /*
-  App shell: a small top nav that stays put while the routed page renders
-  into <Outlet />.
+  App shell for the internal pages: a small top nav that stays put while the
+  routed page renders into <Outlet />. (The "/" landing page renders without it.)
 */
 export function Layout() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <nav className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <Link to="/" className="font-bold">
+          <Link to="/homepage" className="font-bold">
             Filzy
           </Link>
           <div className="flex gap-1">
@@ -23,7 +23,6 @@ export function Layout() {
               <NavLink
                 key={l.to}
                 to={l.to}
-                end={l.to === "/"}
                 className={({ isActive }) =>
                   cn(
                     "rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-muted",
