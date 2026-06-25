@@ -1,1 +1,46 @@
-nigger
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#7c3aed" />
+    <meta
+      name="description"
+      content="Filzy — a fast, modern React + Tailwind + Framer Motion starter, ready to deploy on GitHub Pages."
+    />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Filzy" />
+    <meta property="og:description" content="A fast, modern React + Tailwind starter." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://filzy.site" />
+
+    <title>Filzy — Build something great</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Set theme before paint to avoid a flash of the wrong color scheme -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("filzy-theme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (stored === "dark" || (!stored && prefersDark)) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
