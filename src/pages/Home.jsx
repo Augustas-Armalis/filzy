@@ -6,8 +6,8 @@ const colors = [
   { name: "background", className: "bg-background", outline: true },
   { name: "foreground", className: "bg-foreground" },
   { name: "primary", className: "bg-primary" },
-  { name: "accent", className: "bg-accent" },
   { name: "muted", className: "bg-muted" },
+  { name: "muted-foreground", className: "bg-muted-foreground" },
   { name: "border", className: "bg-border" },
 ];
 
@@ -31,7 +31,7 @@ export default function Home() {
         transition={{ duration: 0.5 }}
         className="text-4xl font-extrabold tracking-tight"
       >
-        <span className="text-primary">Filzy</span> starter
+        Filzy starter
       </motion.h1>
       <motion.p
         initial={{ opacity: 0 }}
@@ -78,11 +78,11 @@ export default function Home() {
         Custom Tailwind values
       </h2>
       <div className="mt-4 flex flex-wrap items-center gap-4">
-        <div className="rounded-[20px] bg-primary/10 px-[22px] py-[14px] text-[13px] font-medium text-primary">
+        <div className="rounded-[20px] border border-border bg-muted px-[22px] py-[14px] text-[13px] font-medium">
           rounded-[20px] · px-[22px] · text-[13px]
         </div>
-        <div className="bg-gradient-to-r from-primary to-accent bg-clip-text text-2xl font-extrabold text-transparent">
-          gradient text
+        <div className="rounded-[20px] bg-foreground px-[22px] py-[14px] text-[13px] font-medium text-background">
+          inverted
         </div>
       </div>
 

@@ -37,8 +37,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # enablement: true makes the workflow turn on GitHub Pages and set the
+      # source to "GitHub Actions" automatically (using the built-in token),
+      # so no manual Settings change is required.
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,6 +1,6 @@
 # Filzy
 
-A minimal **React + Vite + Tailwind CSS v4 + Framer Motion** starter, ready to deploy on **GitHub Pages** at [filzy.site](https://filzy.site).
+A minimal **React + Vite + Tailwind CSS v4 + Framer Motion** starter that auto-deploys to **GitHub Pages**.
 
 Two pages with navigation, one example component, a color-token theme, and a couple of demos — that's it. Build from here.
 
@@ -18,7 +18,6 @@ npm run preview  # preview the build locally
 ```
 index.html                 # entry + Inter font
 vite.config.js             # Vite + React + Tailwind, @/ alias
-public/CNAME               # custom domain (filzy.site)
 public/.nojekyll           # don't run Jekyll on Pages
 .github/workflows/deploy.yml  # auto-deploy to GitHub Pages on push to main
 src/
@@ -54,11 +53,26 @@ Uses `HashRouter`, so client-side routing **just works on GitHub Pages** with no
 
 > Want clean URLs (`filzy.site/about`)? Swap `HashRouter` for `BrowserRouter` and add the standard GitHub Pages `404.html` SPA redirect.
 
-## Deploy to GitHub Pages (filzy.site)
+## Deploy to GitHub Pages
 
-1. Push to GitHub (branch `main`).
-2. Repo **Settings → Pages → Source = "GitHub Actions"**.
-3. Point DNS for `filzy.site` at GitHub: apex `A` records → `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`.
-4. Confirm the custom domain ([public/CNAME](public/CNAME) already has `filzy.site`) and enable **Enforce HTTPS**.
+Fully automatic. On every push to `main`, the [workflow](.github/workflows/deploy.yml)
+builds the site, turns on GitHub Pages (source = "GitHub Actions") if it isn't
+already, and publishes — no manual Settings change needed.
 
-Every push to `main` rebuilds and redeploys automatically.
+Live URL: **https://augustas-armalis.github.io/filzy/**
+
+(The build uses a relative base + `HashRouter`, so it works at that project URL
+and at a root custom domain without any extra config.)
+
+### Optional: custom domain (filzy.site)
+
+`filzy.site` currently has **no DNS configured**, so it points nowhere. To use it:
+
+1. At your domain host, add apex `A` records for `filzy.site` →
+   `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
+   (optionally a `CNAME` record `www` → `augustas-armalis.github.io`).
+2. Add a file `public/CNAME` containing `filzy.site` and push.
+3. Repo **Settings → Pages → Custom domain** → enter `filzy.site`, then enable
+   **Enforce HTTPS** once it verifies.
+
+Until DNS is set up, use the github.io URL above.
