@@ -1,153 +1,43 @@
 @import "tailwindcss";
 
 /*
-  ────────────────────────────────────────────────────────────────────────
-  Filzy design tokens
-  ────────────────────────────────────────────────────────────────────────
-  Edit the values in :root (light) and .dark (dark) to re-theme the whole app.
-  Every color is an OKLCH value, so tweaking hue/lightness is easy.
-
-  These raw variables are wired into Tailwind below via `@theme inline`, which
-  generates utilities like `bg-primary`, `text-foreground`, `border-border`,
-  `ring-ring`, etc. Use those utilities in components — never hard-code colors.
+  Filzy color tokens.
+  Edit these CSS variables to re-theme the whole app — they're wired into
+  Tailwind below, so you use them as utilities like `bg-primary`,
+  `text-foreground`, `border-border`, etc.
 */
-
 :root {
-  /* Radius — drives rounded-sm/md/lg/xl */
+  --background: #ffffff;
+  --foreground: #18181b;
+  --primary: #7c3aed; /* violet */
+  --primary-foreground: #ffffff;
+  --accent: #06b6d4; /* cyan */
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
   --radius: 0.75rem;
-
-  /* Surfaces */
-  --background: oklch(0.99 0.002 285);
-  --foreground: oklch(0.18 0.02 285);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 285);
-  --muted: oklch(0.96 0.004 285);
-  --muted-foreground: oklch(0.52 0.02 285);
-
-  /* Brand */
-  --primary: oklch(0.55 0.23 287);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0.01 287);
-  --secondary-foreground: oklch(0.25 0.04 287);
-  --accent: oklch(0.72 0.15 200);
-  --accent-foreground: oklch(0.15 0.03 200);
-
-  /* Feedback */
-  --destructive: oklch(0.58 0.22 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --success: oklch(0.65 0.17 150);
-  --success-foreground: oklch(0.99 0 0);
-
-  /* Lines & focus */
-  --border: oklch(0.91 0.005 285);
-  --input: oklch(0.91 0.005 285);
-  --ring: oklch(0.55 0.23 287);
-
-  /* Gradient stops used by the hero / CTA aurora */
-  --brand-from: oklch(0.55 0.23 287);
-  --brand-via: oklch(0.6 0.2 330);
-  --brand-to: oklch(0.72 0.15 200);
 }
 
-.dark {
-  --background: oklch(0.15 0.012 285);
-  --foreground: oklch(0.96 0.004 285);
-  --card: oklch(0.19 0.014 285);
-  --card-foreground: oklch(0.96 0.004 285);
-  --muted: oklch(0.24 0.014 285);
-  --muted-foreground: oklch(0.68 0.015 285);
-
-  --primary: oklch(0.68 0.2 287);
-  --primary-foreground: oklch(0.14 0.02 287);
-  --secondary: oklch(0.26 0.02 287);
-  --secondary-foreground: oklch(0.95 0.01 287);
-  --accent: oklch(0.72 0.15 200);
-  --accent-foreground: oklch(0.14 0.02 200);
-
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --success: oklch(0.68 0.16 150);
-  --success-foreground: oklch(0.12 0.02 150);
-
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.68 0.2 287);
-
-  --brand-from: oklch(0.62 0.22 287);
-  --brand-via: oklch(0.62 0.2 330);
-  --brand-to: oklch(0.72 0.15 200);
-}
-
-/* Map the raw variables onto Tailwind's theme so utilities are generated.
-   `inline` means the utilities reference the CSS variables at runtime, so
-   switching .dark updates everything instantly. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-success-foreground: var(--success-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
 
-  --color-brand-from: var(--brand-from);
-  --color-brand-via: var(--brand-via);
-  --color-brand-to: var(--brand-to);
-
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Enable the `dark:` variant based on the .dark class (toggled in JS). */
-@custom-variant dark (&:where(.dark, .dark *));
-
 @layer base {
-  * {
-    border-color: var(--border);
-  }
-
-  html {
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-
   body {
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
-
-  /* Nicer text selection */
-  ::selection {
-    background-color: oklch(0.55 0.23 287 / 0.25);
-  }
-}
-
-/* Reusable utility: gradient brand text */
-@utility text-gradient {
-  background-image: linear-gradient(
-    to right,
-    var(--brand-from),
-    var(--brand-via),
-    var(--brand-to)
-  );
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
 }

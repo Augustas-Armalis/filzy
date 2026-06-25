@@ -1,30 +1,32 @@
-import { ThemeProvider } from "@/components/ThemeProvider";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
-import { Hero } from "@/components/sections/Hero";
-import { Stats } from "@/components/sections/Stats";
-import { Features } from "@/components/sections/Features";
-import { Showcase } from "@/components/sections/Showcase";
-import { CTA } from "@/components/sections/CTA";
+import { HashRouter, Routes, Route } from "react-router-dom";
+import { Layout } from "@/components/Layout";
+import Home from "@/pages/Home";
+import About from "@/pages/About";
 
+/*
+  HashRouter is used so client-side routing works on GitHub Pages with zero
+  server config (URLs look like filzy.site/#/about). If you'd rather have clean
+  URLs (filzy.site/about), switch to BrowserRouter and add the standard
+  GitHub Pages 404.html SPA redirect.
+*/
 export default function App() {
   return (
-    <ThemeProvider>
-      <div className="flex min-h-screen flex-col bg-background text-foreground">
-        <Navbar />
-        <main className="flex-1">
-          {/*
-            This is your homepage. Each section is a self-contained component
-            under src/components/sections — add, remove, or reorder freely.
-          */}
-          <Hero />
-          <Stats />
-          <Features />
-          <Showcase />
-          <CTA />
-        </main>
-        <Footer />
-      </div>
-    </ThemeProvider>
+    <HashRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/about" element={<About />} />
+          <Route
+            path="*"
+            element={
+              <div className="mx-auto max-w-3xl px-6 py-16">
+                <h1 className="text-2xl font-bold">404</h1>
+                <p className="mt-2 text-muted-foreground">Page not found.</p>
+              </div>
+            }
+          />
+        </Route>
+      </Routes>
+    </HashRouter>
   );
 }
