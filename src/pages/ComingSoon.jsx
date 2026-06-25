@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
 /*
-  Public landing at "/". A new random full-resolution Unsplash photo loads on
-  every visit/reload, with a frosted-glass "coming soon..." card on top.
+  Public landing at "/".
 
-  Unsplash retired its keyless random endpoint (source.unsplash.com), so we use
-  a curated pool of real Unsplash photo IDs served from their image CDN
-  (images.unsplash.com) — no API key, and the IDs are verified to exist. The URL
-  requests the photo cropped to your exact display resolution.
+  Loading strategy (fast + smooth):
+  1. The "coming soon..." card paints immediately on the dark background — it
+     never waits on the image.
+  2. A tiny (~1KB) blurred placeholder loads near-instantly behind it.
+  3. The full, sharp image — sized to the device (capped DPR, WebP via
+     auto=format) — fades in over the placeholder once it's ready.
+
+  Images come from the Unsplash CDN (keyless). New random photo each load.
 */
 const UNSPLASH_IDS = [
   "1506905925346-21bda4d32df4",
@@ -37,16 +40,22 @@ const UNSPLASH_IDS = [
 ];
 
 export default function ComingSoon() {
-  const [src] = useState(() => {
+  const [cfg] = useState(() => {
+    // Cap DPR at 2 and each dimension at 2560 so big/retina screens don't
+    // pull huge files. auto=format serves WebP/AVIF where supported.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cap = (n) => Math.min(Math.round(n * dpr), 2560);
     const id = UNSPLASH_IDS[Math.floor(Math.random() * UNSPLASH_IDS.length)];
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.round(window.screen.width * dpr);
-    const h = Math.round(window.screen.height * dpr);
-    return `https://images.unsplash.com/photo-${id}?w=${w}&h=${h}&fit=crop&crop=entropy&q=85&auto=format`;
+    const base = `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&crop=entropy`;
+    return {
+      lqip: `${base}&w=64&q=20`,
+      full: `${base}&w=${cap(window.innerWidth)}&h=${cap(window.innerHeight)}&q=70`,
+    };
   });
-  const [loaded, setLoaded] = useState(false);
+  const [lqipLoaded, setLqipLoaded] = useState(false);
+  const [fullLoaded, setFullLoaded] = useState(false);
 
-  // Dark fallback (incl. mobile overscroll) while the photo loads.
+  // Dark fallback (incl. mobile overscroll) so the card is readable instantly.
   useEffect(() => {
     const prev = document.body.style.backgroundColor;
     document.body.style.backgroundColor = "#070808";
@@ -57,23 +66,37 @@ export default function ComingSoon() {
 
   return (
     <div className="relative flex min-h-[100svh] w-full items-center justify-center overflow-hidden bg-[#070808] px-6">
-      {/* Random full-res Unsplash background photo */}
+      {/* 1KB blurred placeholder — appears almost immediately */}
       <img
-        src={src}
+        src={cfg.lqip}
         alt=""
         aria-hidden="true"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => setLqipLoaded(true)}
         className={
-          "absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
-          (loaded ? "opacity-100" : "opacity-0")
+          "pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover blur-2xl transition-opacity duration-500 " +
+          (lqipLoaded ? "opacity-100" : "opacity-0")
         }
       />
 
-      {/* Frosted-glass card */}
+      {/* Full sharp, device-sized image — fades in when ready */}
+      <img
+        src={cfg.full}
+        alt=""
+        aria-hidden="true"
+        fetchPriority="high"
+        decoding="async"
+        onLoad={() => setFullLoaded(true)}
+        className={
+          "pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
+          (fullLoaded ? "opacity-100" : "opacity-0")
+        }
+      />
+
+      {/* Card — paints immediately on the dark bg, before any image */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
         className="relative z-10 rounded-2xl border border-white/10 bg-white/10 px-8 py-5 backdrop-blur-[10px]"
       >
         <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
