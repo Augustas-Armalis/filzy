@@ -484,18 +484,30 @@ export function Receive({ note, files, status, progress, allBusy, onDownloadOne,
   );
 }
 
-// Connecting / error state for the recipient route.
-export function ReceiveStatusCard({ variant }) {
-  if (variant === "error") {
-    return (
-      <div className={CARD}>
-        <StatusBox Icon={WifiOff} title="Link unavailable" subtitle="This beam may have ended, or the sender went offline." />
-      </div>
-    );
-  }
+// Connection-state screens for the recipient route (connecting / timeout /
+// closed / interrupted), with a retry on the failure states.
+const RECEIVE_STATUS = {
+  connecting: { Icon: Loader, spin: true, title: "Connecting…", subtitle: "Linking you to the sender" },
+  timeout: { Icon: WifiOff, title: "Can't reach the sender", subtitle: "They may be offline, or the link has expired.", retry: true },
+  error: { Icon: WifiOff, title: "Connection closed", subtitle: "The sender stopped sharing or went offline.", retry: true },
+  interrupted: { Icon: WifiOff, title: "Transfer interrupted", subtitle: "The connection dropped mid-download.", retry: true },
+};
+
+export function ReceiveStatusCard({ variant, onRetry }) {
+  const v = RECEIVE_STATUS[variant] || RECEIVE_STATUS.connecting;
   return (
     <div className={CARD}>
-      <StatusBox Icon={Loader} iconClass="animate-spin text-text [animation-duration:1.1s]" title="Connecting…" subtitle="Linking you to the sender" />
+      <StatusBox
+        Icon={v.Icon}
+        iconClass={v.spin ? "animate-spin text-text [animation-duration:1.1s]" : undefined}
+        title={v.title}
+        subtitle={v.subtitle}
+      />
+      {v.retry && (
+        <button type="button" onClick={onRetry} className={cn(CTA, "w-full")}>
+          Try again
+        </button>
+      )}
     </div>
   );
 }

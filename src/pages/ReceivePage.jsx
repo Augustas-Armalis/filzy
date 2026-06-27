@@ -104,13 +104,18 @@ export default function ReceivePage() {
         }
       },
       onError: () => setPhase("error"),
+      onSevered: () => setPhase((p) => (p === "done" ? p : "interrupted")),
     });
     rxRef.current = rx;
 
     // expose the queue pump for the render-scope handlers
     rxRef.current._pump = pump;
 
+    // If we can't reach the sender in time, surface a retry-able message.
+    const timeoutId = setTimeout(() => setPhase((p) => (p === "connecting" ? "timeout" : p)), 12000);
+
     return () => {
+      clearTimeout(timeoutId);
       rx.close();
       queue.current = [];
       active.current = null;
@@ -147,14 +152,10 @@ export default function ReceivePage() {
 
   return (
     <Shell>
-      <div className="flex flex-1 items-center justify-center p-[10px] lg:justify-start lg:p-0 lg:pl-32">
-        {phase === "connecting" ? (
-          <ReceiveStatusCard variant="connecting" />
-        ) : phase === "error" ? (
-          <ReceiveStatusCard variant="error" />
-        ) : phase === "done" ? (
+      <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] lg:justify-start lg:p-0 lg:pl-32">
+        {phase === "done" ? (
           <DownloadStarted />
-        ) : (
+        ) : phase === "ready" ? (
           <Receive
             note={note}
             files={files}
@@ -164,6 +165,8 @@ export default function ReceivePage() {
             onDownloadOne={downloadOne}
             onDownloadAll={downloadAll}
           />
+        ) : (
+          <ReceiveStatusCard variant={phase} onRetry={() => window.location.reload()} />
         )}
       </div>
     </Shell>
