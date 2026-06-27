@@ -8,10 +8,9 @@ import { sha256Hex } from "./hash";
    signaling URL is configured. Ported from space-send (src/transfer/beam.ts).
    ========================================================================== */
 
-const CHUNK = 64 * 1024; // 64 KB — safe across browsers
-const OVERDRIVE_CHUNK = 256 * 1024; // wider pipe, fewer send() calls
-const HIGH_WATER = 8 * 1024 * 1024; // pause streaming above 8 MB buffered
-const OVERDRIVE_HIGH_WATER = 16 * 1024 * 1024;
+const CHUNK = 256 * 1024; // 256 KB default — clamped per-connection to maxMessageSize
+const HIGH_WATER = 8 * 1024 * 1024; // keep up to 8 MB in flight before pausing
+const OVERDRIVE_HIGH_WATER = 16 * 1024 * 1024; // overdrive keeps more in flight
 const LOW_WATER = 1 * 1024 * 1024;
 
 function bars(rtt) {
@@ -53,7 +52,6 @@ export class BeamHost {
   // the network/peer ceiling.
   setOverdrive(on) {
     this.throttle = 0;
-    this.chunk = on ? OVERDRIVE_CHUNK : CHUNK;
     this.highWater = on ? OVERDRIVE_HIGH_WATER : HIGH_WATER;
   }
 
@@ -182,14 +180,21 @@ export class BeamHost {
       const speed = dt > 0 ? (msg.received - p.lastBytes) / dt : p.recipient.speed;
       p.lastBytes = msg.received;
       p.lastTime = now;
+      p.lastProgressAt = now;
       p.recipient.progress = frac;
       p.recipient.speed = speed > 0 ? speed : p.recipient.speed;
       this.cb.onRecipientUpdate?.(remoteId, { progress: frac, speed: p.recipient.speed });
     } else if (msg.t === "complete") {
       p.recipient.status = "complete";
       p.recipient.progress = 1;
+      p.recipient.speed = 0;
       p.recipient.completedAt = Date.now();
-      this.cb.onRecipientUpdate?.(remoteId, { status: "complete", progress: 1, completedAt: Date.now() });
+      this.cb.onRecipientUpdate?.(remoteId, { status: "complete", progress: 1, speed: 0, completedAt: Date.now() });
+    } else if (msg.t === "meta") {
+      if (msg.region) {
+        p.recipient.region = msg.region;
+        this.cb.onRecipientUpdate?.(remoteId, { region: msg.region });
+      }
     }
   }
 
@@ -206,40 +211,30 @@ export class BeamHost {
     if (!p || !p.channel) return;
     const channel = p.channel;
     channel.bufferedAmountLowThreshold = LOW_WATER;
+    // Don't exceed what this connection actually allows per message.
+    const maxMsg = p.pc.sctp?.maxMessageSize;
+    const chunk = maxMsg && maxMsg > 0 ? Math.min(this.chunk, maxMsg) : this.chunk;
     const wanted = this.files.filter((f) => fileIds.includes(f.meta.id));
 
     for (const { meta, file } of wanted) {
       if (this.closed) return;
       this.sendCtrl(channel, { t: "file-begin", id: meta.id, name: meta.name, size: meta.size, mime: meta.mime });
       let offset = 0;
-      let lastThrottleTs = Date.now();
-      let sentSinceThrottle = 0;
+      // Prefetch the next chunk while the current is in flight — overlaps the
+      // disk read with the network send so the channel never sits idle.
+      let next = file.size > 0 ? file.slice(0, Math.min(chunk, file.size)).arrayBuffer() : null;
       while (offset < file.size) {
         if (this.closed || channel.readyState !== "open") return;
-        const slice = file.slice(offset, Math.min(offset + this.chunk, file.size));
-        const buf = await slice.arrayBuffer();
-        // Backpressure
+        const buf = await next;
+        const nextOffset = offset + buf.byteLength;
+        next = nextOffset < file.size ? file.slice(nextOffset, Math.min(nextOffset + chunk, file.size)).arrayBuffer() : null;
         if (channel.bufferedAmount > this.highWater) await this.waitDrain(channel);
-        // Optional throttle
-        if (this.throttle > 0) {
-          sentSinceThrottle += buf.byteLength;
-          const elapsed = (Date.now() - lastThrottleTs) / 1000;
-          const allowed = this.throttle * elapsed;
-          if (sentSinceThrottle > allowed) {
-            const waitMs = ((sentSinceThrottle - allowed) / this.throttle) * 1000;
-            await new Promise((r) => setTimeout(r, Math.min(250, waitMs)));
-          }
-          if (elapsed > 1) {
-            lastThrottleTs = Date.now();
-            sentSinceThrottle = 0;
-          }
-        }
         try {
           channel.send(buf);
         } catch {
           return;
         }
-        offset += buf.byteLength;
+        offset = nextOffset;
       }
       this.sendCtrl(channel, { t: "file-end", id: meta.id, hash: meta.hash });
     }
@@ -260,7 +255,14 @@ export class BeamHost {
       if (this.closed) return;
       let agg = 0;
       this.peers.forEach((p) => {
-        if (p.recipient.status === "extracting") agg += p.recipient.speed;
+        // No fresh progress for a moment → this peer isn't transferring; zero it
+        // so the speed readout drops instead of sticking on a stale value.
+        const stale = Date.now() - (p.lastProgressAt || 0) > 1500;
+        if (stale && p.recipient.speed) {
+          p.recipient.speed = 0;
+          this.cb.onRecipientUpdate?.(p.recipient.id, { speed: 0 });
+        }
+        if (p.recipient.status === "extracting" && !stale) agg += p.recipient.speed;
         // Refresh signal from RTT when available.
         p.pc.getStats?.().then((stats) => {
           stats.forEach((report) => {
@@ -350,6 +352,7 @@ export class BeamReceiver {
         this.cb.onConnected?.();
         this.send({ t: "ready" });
         this.startProgressLoop();
+        void this.reportRegion();
       };
       this.channel.onmessage = (ev) => this.onData(ev.data);
       this.channel.onclose = () => {
@@ -504,6 +507,21 @@ export class BeamReceiver {
         this.cb.onAllComplete?.();
         this.stopProgressLoop();
       }
+    }
+  }
+
+  // Best-effort geo from a free IP API, shared with the host so it can show
+  // roughly where each recipient is (like space-send). Fails silently.
+  async reportRegion() {
+    try {
+      const res = await fetch("https://ipwho.is/");
+      const d = await res.json();
+      if (d && d.success !== false) {
+        const region = [d.city, d.country_code].filter(Boolean).join(", ");
+        if (region) this.send({ t: "meta", region });
+      }
+    } catch {
+      /* offline / blocked — no region shown */
     }
   }
 

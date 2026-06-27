@@ -6,6 +6,7 @@ import { BeamReceiver } from "@/lib/beam";
 import { selfId as genSelfId } from "@/lib/ids";
 import { kindOf } from "@/lib/files";
 import { zipSync, downloadBlob } from "@/lib/zip";
+import { preventSleep, allowSleep } from "@/lib/wakelock";
 
 /*
   The recipient. Opens filzy.site/#/s/<beamId>, connects to the sender over
@@ -114,16 +115,22 @@ export default function ReceivePage() {
     // If we can't reach the sender in time, surface a retry-able message.
     const timeoutId = setTimeout(() => setPhase((p) => (p === "connecting" ? "timeout" : p)), 12000);
 
+    // Keep the screen awake while connected (the most a browser can do — true
+    // background transfer with the tab closed isn't possible without a native app).
+    void preventSleep();
+
     return () => {
       clearTimeout(timeoutId);
       rx.close();
       queue.current = [];
       active.current = null;
+      void allowSleep();
     };
   }, [id]);
 
   const downloadOne = async (fid) => {
     if (statusRef.current[fid] === "downloading") return; // already in flight / queued
+    void preventSleep(); // user gesture — reliably grabs the wake lock
     const f = filesRef.current.find((x) => x.id === fid);
     let mode = "single";
     // Progressive save-to-disk where supported (Chromium): the browser writes the

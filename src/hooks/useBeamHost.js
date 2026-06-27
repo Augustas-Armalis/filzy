@@ -16,8 +16,9 @@ const STATUS_MAP = {
 // The "location" slot in a UserRow: live speed while downloading, else a
 // connection label. (We don't do geo-IP — that would need a 3rd-party service.)
 function locationLabel(r) {
+  if (r.region) return r.region; // real geo from the recipient's IP
   if (r.status === "extracting") return `${formatBytes(r.speed || 0)}/s`;
-  return "Direct";
+  return "Locating…";
 }
 
 // Map one Home item (loose file or folder) to host files. File ids derive from
