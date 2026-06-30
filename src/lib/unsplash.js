@@ -15,6 +15,15 @@
 const ACCESS_KEY = "2AbzPLtKUeQE_raF0SFLAVx_GIaejG6O3XJ49TgNbIA";
 const API = "https://api.unsplash.com";
 
+// Required by the Unsplash API Guidelines: every link back to Unsplash must
+// carry these UTM params so photographers get credited for the referral.
+// https://help.unsplash.com/en/articles/2511315-guideline-attribution
+const UTM = "utm_source=filzy&utm_medium=referral";
+
+// Append the attribution UTM params to any unsplash.com URL.
+export const withUtm = (url) =>
+  url ? url + (url.includes("?") ? "&" : "?") + UTM : url;
+
 // Verified, beautiful keyless fallbacks (native orientation).
 const FALLBACK = {
   landscape: [
@@ -66,6 +75,21 @@ export function takePhoto(orientation) {
   return { raw: `https://images.unsplash.com/photo-${id}` };
 }
 
+// Required by the Unsplash API Guidelines: when a photo is actually used
+// (here: shown as the background), ping its download_location endpoint once.
+// This is a tracking event, NOT a real download — fire-and-forget.
+// https://help.unsplash.com/en/articles/2511258-guideline-triggering-a-download
+const triggered = new Set();
+export function triggerDownload(downloadLocation) {
+  if (!downloadLocation || triggered.has(downloadLocation)) return;
+  triggered.add(downloadLocation);
+  try {
+    fetch(withParams(downloadLocation, `client_id=${ACCESS_KEY}`)).catch(() => {});
+  } catch {
+    /* offline → ignore, attribution still stands */
+  }
+}
+
 const COOLDOWN_KEY = "filzy_unsplash_cooldown";
 
 // Non-blocking: top up the cache for future loads (one call returns 30 photos).
@@ -93,6 +117,7 @@ export async function refillPhotos(orientation, min = 6) {
         raw: p.urls.raw,
         name: p.user?.name || null,
         profile: p.user?.links?.html || null,
+        downloadLocation: p.links?.download_location || null,
       }));
     if (photos.length) write(orientation, [...read(orientation), ...photos]);
   } catch {

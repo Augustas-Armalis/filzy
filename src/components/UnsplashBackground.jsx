@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { takePhoto, refillPhotos, withParams } from "@/lib/unsplash";
+import { takePhoto, refillPhotos, withParams, triggerDownload } from "@/lib/unsplash";
 
 /*
   Full-bleed background photo, loaded progressively (blur → mid → full premium).
@@ -7,7 +7,7 @@ import { takePhoto, refillPhotos, withParams } from "@/lib/unsplash";
   the content makes the page taller than the viewport — no empty space.
   Random Unsplash photo per load, portrait on mobile / landscape on desktop.
 */
-export function UnsplashBackground() {
+export function UnsplashBackground({ onPhoto }) {
   const [stages] = useState(() => {
     const orientation =
       window.innerHeight >= window.innerWidth ? "portrait" : "landscape";
@@ -28,6 +28,7 @@ export function UnsplashBackground() {
 
     return {
       orientation,
+      photo,
       urls: [
         at(26, 25), // super-low blurred placeholder (~1KB)
         at(3, 55), // mid quality
@@ -43,7 +44,8 @@ export function UnsplashBackground() {
 
   useEffect(() => {
     refillPhotos(stages.orientation); // top up the endless pool for next loads
-  }, [stages.orientation]);
+    onPhoto?.(stages.photo); // hand the photo up so it can be attributed
+  }, [stages.orientation, stages.photo, onPhoto]);
 
   return (
     <div className="absolute inset-0 overflow-hidden">
@@ -55,13 +57,16 @@ export function UnsplashBackground() {
           aria-hidden="true"
           fetchPriority={i === 0 || i === stages.urls.length - 1 ? "high" : "low"}
           decoding="async"
-          onLoad={() =>
+          onLoad={() => {
+            // The full-res stage finished → the photo is genuinely "used".
+            if (i === stages.urls.length - 1)
+              triggerDownload(stages.photo.downloadLocation);
             setDone((d) => {
               const c = [...d];
               c[i] = true;
               return c;
-            })
-          }
+            });
+          }}
           className={
             "pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
             (i === 0 ? "scale-110 blur-2xl " : "") +
