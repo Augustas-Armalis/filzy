@@ -196,17 +196,53 @@ export function createSignaling(beamId, selfId) {
   return new CombinedSignaling(beamId, selfId);
 }
 
-/** ICE configuration: public STUN for direct connections, plus a free public
-    TURN relay as a fallback for hostile NATs (so cross-device still connects). */
+/** ICE configuration.
+
+    STUN (free, public) lets two friendly-NAT peers connect directly. That's
+    enough for same-Wi-Fi / simple-router beams. But when a peer is on cellular
+    or behind a strict/symmetric NAT, WebRTC needs a TURN relay to bounce the
+    bytes — without one, the connection just hangs and times out.
+
+    There is NO more zero-signup public TURN (the old openrelay.metered.ca was
+    shut down). So TURN is env-driven: paste your own free credentials in and
+    they light up. Two ways:
+
+    1. Metered free tier (simplest): set VITE_TURN_USER + VITE_TURN_CRED. We
+       expand them across Metered's standard global relay ports (80 UDP, 80 TCP,
+       443, and 443/TLS which punches through the most hostile firewalls).
+       Override the host with VITE_TURN_HOST if your dashboard shows a different
+       one.
+    2. Any single custom relay (e.g. Cloudflare later): set VITE_TURN_URL
+       (+ USER/CRED). Used as-is, in addition to the above.
+
+    With no TURN env set, beams still work on friendly networks via STUN alone. */
+const TURN_HOST = import.meta.env.VITE_TURN_HOST || "global.relay.metered.ca";
+const TURN_USER = import.meta.env.VITE_TURN_USER;
+const TURN_CRED = import.meta.env.VITE_TURN_CRED;
+
+const meteredTurn =
+  TURN_USER && TURN_CRED
+    ? [
+        `turn:${TURN_HOST}:80`,
+        `turn:${TURN_HOST}:80?transport=tcp`,
+        `turn:${TURN_HOST}:443`,
+        `turns:${TURN_HOST}:443?transport=tcp`,
+      ].map((urls) => ({ urls, username: TURN_USER, credential: TURN_CRED }))
+    : [];
+
 export const ICE_CONFIG = {
   iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+    // Bundle several Google STUN endpoints so candidate gathering doesn't stall
+    // on a single slow/unreachable server — first to answer wins.
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+    ...meteredTurn,
     ...(import.meta.env.VITE_TURN_URL
-      ? [{ urls: import.meta.env.VITE_TURN_URL, username: import.meta.env.VITE_TURN_USER, credential: import.meta.env.VITE_TURN_CRED }]
+      ? [{ urls: import.meta.env.VITE_TURN_URL, username: TURN_USER, credential: TURN_CRED }]
       : []),
   ],
+  // Pre-gather a small pool of candidates as soon as the RTCPeerConnection is
+  // created, before the offer/answer is built. On the same network the local
+  // (host) candidates are ready essentially instantly, so the direct P2P path
+  // is nailed up the moment signaling completes instead of after a gather round.
+  iceCandidatePoolSize: 4,
 };

@@ -8,10 +8,21 @@ import { sha256Hex } from "./hash";
    signaling URL is configured. Ported from space-send (src/transfer/beam.ts).
    ========================================================================== */
 
-const CHUNK = 256 * 1024; // 256 KB default — clamped per-connection to maxMessageSize
-const HIGH_WATER = 8 * 1024 * 1024; // keep up to 8 MB in flight before pausing
+const CHUNK = 512 * 1024; // 512 KB default — clamped per-connection to maxMessageSize
+const HIGH_WATER = 12 * 1024 * 1024; // keep up to 12 MB in flight before pausing
 const OVERDRIVE_HIGH_WATER = 16 * 1024 * 1024; // overdrive keeps more in flight
 const LOW_WATER = 1 * 1024 * 1024;
+
+/* LAN turbo. When the selected ICE path is a direct same-network link (host↔host
+   candidates, no relay, sub-millisecond RTT) there's effectively no bandwidth or
+   latency ceiling, so we widen the pipe hard: 1 MB messages (clamped to the
+   connection's maxMessageSize) and up to 64 MB in flight. That lets SCTP keep the
+   local link saturated instead of tip-toeing with the internet-safe defaults.
+   Detected automatically per-peer from getStats — never surfaced in the UI. */
+const LAN_CHUNK = 1024 * 1024; // 1 MB messages on a local link
+const LAN_HIGH_WATER = 64 * 1024 * 1024; // keep up to 64 MB in flight on LAN
+const LAN_LOW_WATER = 8 * 1024 * 1024; // refill early so the local pipe never drains
+const LAN_RTT_MS = 8; // selected-pair RTT below this ⇒ treat as same-network
 
 function bars(rtt) {
   if (rtt < 40) return 5;
@@ -210,10 +221,14 @@ export class BeamHost {
     const p = this.peers.get(remoteId);
     if (!p || !p.channel) return;
     const channel = p.channel;
-    channel.bufferedAmountLowThreshold = LOW_WATER;
+    channel.bufferedAmountLowThreshold = p.turbo ? LAN_LOW_WATER : LOW_WATER;
     // Don't exceed what this connection actually allows per message.
     const maxMsg = p.pc.sctp?.maxMessageSize;
-    const chunk = maxMsg && maxMsg > 0 ? Math.min(this.chunk, maxMsg) : this.chunk;
+    const cap = maxMsg && maxMsg > 0 ? maxMsg : Infinity;
+    // Chunk/high-water are read fresh each iteration so that LAN turbo — which is
+    // detected asynchronously by the speed loop — can widen the pipe mid-transfer.
+    const chunkFor = () => Math.min(p.turbo ? LAN_CHUNK : this.chunk, cap);
+    const highWaterFor = () => (p.turbo ? Math.max(this.highWater, LAN_HIGH_WATER) : this.highWater);
     const wanted = this.files.filter((f) => fileIds.includes(f.meta.id));
 
     for (const { meta, file } of wanted) {
@@ -222,13 +237,14 @@ export class BeamHost {
       let offset = 0;
       // Prefetch the next chunk while the current is in flight — overlaps the
       // disk read with the network send so the channel never sits idle.
-      let next = file.size > 0 ? file.slice(0, Math.min(chunk, file.size)).arrayBuffer() : null;
+      let next = file.size > 0 ? file.slice(0, Math.min(chunkFor(), file.size)).arrayBuffer() : null;
       while (offset < file.size) {
         if (this.closed || channel.readyState !== "open") return;
         const buf = await next;
         const nextOffset = offset + buf.byteLength;
-        next = nextOffset < file.size ? file.slice(nextOffset, Math.min(nextOffset + chunk, file.size)).arrayBuffer() : null;
-        if (channel.bufferedAmount > this.highWater) await this.waitDrain(channel);
+        const c = chunkFor();
+        next = nextOffset < file.size ? file.slice(nextOffset, Math.min(nextOffset + c, file.size)).arrayBuffer() : null;
+        if (channel.bufferedAmount > highWaterFor()) await this.waitDrain(channel);
         try {
           channel.send(buf);
         } catch {
@@ -250,6 +266,32 @@ export class BeamHost {
     });
   }
 
+  // Decide whether the selected ICE candidate-pair is a direct same-network link
+  // and, if so, flip this peer into LAN turbo. A local link is one that is not
+  // relayed (neither end is a TURN "relay" candidate) and is either host↔host
+  // (or peer-reflexive, which host candidates present as behind a local router)
+  // or has a sub-millisecond round-trip. streamTo reads p.turbo live, so the pipe
+  // widens on the very next chunk. Silent by design — no UI signal.
+  maybeTurbo(p, pair, cands) {
+    const local = cands.get(pair.localCandidateId);
+    const remote = cands.get(pair.remoteCandidateId);
+    const rttMs = pair.currentRoundTripTime != null ? pair.currentRoundTripTime * 1000 : null;
+    const notRelay = (c) => c && c.candidateType !== "relay";
+    const localish = (c) => c && (c.candidateType === "host" || c.candidateType === "prflx");
+    const direct = notRelay(local) && notRelay(remote);
+    if (!direct) return;
+    const sameNetwork = (localish(local) && localish(remote)) || (rttMs != null && rttMs < LAN_RTT_MS);
+    if (!sameNetwork) return;
+    p.turbo = true;
+    if (p.channel && p.channel.readyState === "open") {
+      try {
+        p.channel.bufferedAmountLowThreshold = LAN_LOW_WATER;
+      } catch {
+        /* channel closing */
+      }
+    }
+  }
+
   startSpeedLoop() {
     const tick = () => {
       if (this.closed) return;
@@ -263,9 +305,14 @@ export class BeamHost {
           this.cb.onRecipientUpdate?.(p.recipient.id, { speed: 0 });
         }
         if (p.recipient.status === "extracting" && !stale) agg += p.recipient.speed;
-        // Refresh signal from RTT when available.
+        // Refresh signal from RTT, and sniff the selected ICE path for a
+        // same-network link so we can flip on LAN turbo (never shown in the UI).
         p.pc.getStats?.().then((stats) => {
+          const cands = new Map();
+          let pair = null;
           stats.forEach((report) => {
+            if (report.type === "local-candidate" || report.type === "remote-candidate") cands.set(report.id, report);
+            if (report.type === "candidate-pair" && report.state === "succeeded" && (report.nominated || report.selected)) pair = report;
             if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime != null) {
               const b = bars(report.currentRoundTripTime * 1000);
               if (b !== p.recipient.signal) {
@@ -274,6 +321,7 @@ export class BeamHost {
               }
             }
           });
+          if (pair && !p.turbo) this.maybeTurbo(p, pair, cands);
         });
       });
       this.cb.onAggregateSpeed?.(agg);
