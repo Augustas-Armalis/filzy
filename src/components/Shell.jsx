@@ -23,7 +23,12 @@ export function Shell({ children }) {
       <Navbar />
       <PoweredBy />
       <Attribution photo={photo} />
-      <main className="relative z-10 flex flex-1 flex-col">{children}</main>
+      {/*
+        pointer-events-none lets clicks in the empty areas of <main> fall through
+        to the credits behind it (z-0); each page re-enables its actual cards with
+        [&>*]:pointer-events-auto so the content stays fully interactive.
+      */}
+      <main className="pointer-events-none relative z-10 flex flex-1 flex-col">{children}</main>
     </div>
   );
 }

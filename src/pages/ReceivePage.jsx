@@ -159,7 +159,7 @@ export default function ReceivePage() {
 
   return (
     <Shell>
-      <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] lg:justify-start lg:p-0 lg:pl-32">
+      <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
         {phase === "done" ? (
           <DownloadStarted />
         ) : phase === "ready" ? (
