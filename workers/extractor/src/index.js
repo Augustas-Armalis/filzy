@@ -226,6 +226,24 @@ async function resolveWithBrowser(env, videoId) {
       }));
       throw new Error(`YouTube did not expose a downloadable media stream (${availableLevels.length} qualities, state ${state.playerState ?? "?"}, ready ${state.videoReadyState ?? "?"})`);
     }
+    const outputFormats = [...formats];
+    if (!formats.some((format) => format.mimeType?.startsWith("audio/"))) {
+      const combined = formats.find((format) => format.audioQuality || format.audioChannels);
+      if (combined) {
+        outputFormats.push({
+          ...combined,
+          itag: 900_000 + Number(combined.itag || 0),
+          mimeType: "audio/mp4; codecs=\"mp4a.40.2\"",
+          width: undefined,
+          height: undefined,
+          fps: undefined,
+          qualityLabel: undefined,
+          hasVideo: false,
+          hasAudio: true,
+          derivedFromVideo: true,
+        });
+      }
+    }
 
     keepSession = true;
     return {
@@ -234,7 +252,7 @@ async function resolveWithBrowser(env, videoId) {
       author: details.author || "YouTube",
       durationSeconds: Number(details.lengthSeconds || 0),
       thumbnail: details.thumbnail?.thumbnails?.at(-1)?.url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-      formats,
+      formats: outputFormats,
     };
   } finally {
     await cdp?.detach().catch(() => {});
