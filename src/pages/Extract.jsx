@@ -48,10 +48,15 @@ const CHANNEL_OPTIONS = [
 const SOURCE_OPTIONS = [
   { value: "any", label: "Any", Icon: Link2 },
   { value: "youtube", label: "YouTube", favicon: "https://www.youtube.com/favicon.ico" },
-  { value: "tiktok", label: "TikTok", favicon: "https://www.tiktok.com/favicon.ico", disabled: true },
-  { value: "instagram", label: "Instagram", favicon: "https://www.instagram.com/favicon.ico", disabled: true },
+  { value: "tiktok", label: "TikTok", favicon: "https://www.tiktok.com/favicon.ico" },
+  { value: "instagram", label: "Instagram", favicon: "https://www.instagram.com/favicon.ico" },
+  { value: "facebook", label: "Facebook", favicon: "https://www.facebook.com/favicon.ico" },
 ];
 const TARGET_OPTIONS = TARGETS.map((option) => ({ ...option, Icon: option.kind === "audio" ? Music2 : Video }));
+
+function platformFavicon(id) {
+  return SOURCE_OPTIONS.find((option) => option.value === id)?.favicon || "";
+}
 
 function PickerMark({ option, className }) {
   if (option?.favicon) return <img src={option.favicon} alt="" width="16" height="16" className={cn("h-[16px] w-[16px] object-contain", className)} />;
@@ -169,7 +174,7 @@ function TargetIcon({ target, className }) {
   return <Icon size={14} strokeWidth={1.17} absoluteStrokeWidth className={className} aria-hidden="true" />;
 }
 
-function YouTubeMark({ active = false, className }) {
+function PlatformMark({ source = "youtube", active = false, className }) {
   return (
     <span className={cn("relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[9px] border", active ? "border-red-100 bg-red-50" : "border-border bg-bg", className)}>
       {active && (
@@ -180,7 +185,7 @@ function YouTubeMark({ active = false, className }) {
           transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
-      <img src="https://www.youtube.com/favicon.ico" alt="" width="16" height="16" className={cn("relative h-[16px] w-[16px]", !active && "grayscale opacity-70")} />
+      <img src={platformFavicon(source)} alt="" width="16" height="16" className={cn("relative h-[16px] w-[16px]", !active && "grayscale opacity-70")} />
     </span>
   );
 }
@@ -348,10 +353,10 @@ function MediaRow({ item, onPatch, onRemove, onCancel }) {
             target="_blank"
             rel="noreferrer"
             className="hidden h-[36px] cursor-pointer items-center gap-[5px] rounded-[10px] border border-border bg-bg px-[9px] text-alt-text transition-[background-color,color] duration-150 hover:bg-white-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20 md:flex"
-            aria-label={`Open ${item.media.title} on YouTube`}
+            aria-label={`Open ${item.media.title} on ${item.media.provider?.label || "the source site"}`}
           >
-            <img src="https://www.youtube.com/favicon.ico" alt="" width="13" height="13" className="h-[13px] w-[13px]" />
-            <span className="text-[12px]">YouTube</span>
+            <img src={platformFavicon(item.media.provider?.id)} alt="" width="13" height="13" className="h-[13px] w-[13px]" />
+            <span className="text-[12px]">{item.media.provider?.label || "Source"}</span>
           </a>
           <ArrowRight size={14} strokeWidth={1.17} absoluteStrokeWidth className="hidden shrink-0 text-dalt-text sm:block" aria-hidden="true" />
 
@@ -582,7 +587,7 @@ export default function Extract() {
             inputError ? "border-red-200" : inspection.state === "supported" ? "border-red-100" : "border-border",
           )}
         >
-          {inspection.state === "supported" ? <YouTubeMark active /> : (
+          {inspection.state === "supported" ? <PlatformMark source={inspection.source?.id} active /> : (
             <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[9px] border border-border bg-bg">
               <Link2 size={15} strokeWidth={1.17} absoluteStrokeWidth className="text-alt-text" aria-hidden="true" />
             </span>
@@ -600,7 +605,7 @@ export default function Extract() {
             disabled={resolving}
             onChange={(event) => { setDraft(event.target.value); setInputError(""); }}
             onPaste={onPaste}
-            placeholder="Paste a YouTube link…"
+            placeholder="Paste a media link…"
             className="h-[34px] min-w-0 flex-1 bg-transparent text-[14px] text-text outline-none placeholder:text-dalt-text disabled:cursor-wait"
           />
         </form>

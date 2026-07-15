@@ -51,6 +51,45 @@ async function collectStream(stream, totalBytes, { signal, onProgress } = {}) {
   }
 }
 
+async function downloadBrowserSession(format, options = {}) {
+  const target = format.raw?.url;
+  const sessionId = format.raw?.workerSessionId;
+  if (!target || !sessionId) throw new Error("That extraction session has expired. Inspect the link again.");
+  const chunks = [];
+  const chunkSize = 1024 * 1024;
+  let start = 0;
+  let total = Number(format.bytes || 0);
+  while (!total || start < total) {
+    throwIfAborted(options.signal);
+    const end = total ? Math.min(total - 1, start + chunkSize - 1) : start + chunkSize - 1;
+    const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/browser-media`;
+    endpoint.search = "";
+    endpoint.searchParams.set("sessionId", sessionId);
+    endpoint.searchParams.set("url", target);
+    if (total && end >= total - 1) endpoint.searchParams.set("close", "1");
+    const response = await fetch(endpoint, {
+      signal: options.signal,
+      headers: { range: `bytes=${start}-${end}` },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "The source stream could not be downloaded.");
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.byteLength) break;
+    chunks.push(bytes);
+    const contentRange = response.headers.get("content-range") || "";
+    const parsedTotal = Number(contentRange.match(/\/(\d+)$/)?.[1] || 0);
+    if (parsedTotal) total = parsedTotal;
+    start += bytes.byteLength;
+    options.onProgress?.(total ? Math.min(1, start / total) : 0);
+    if (!total && bytes.byteLength < chunkSize) break;
+  }
+  options.onProgress?.(1);
+  return new Blob(chunks, { type: format.mimeType });
+}
+
 async function downloadFormat(media, format, options = {}) {
   if (!format) throw new Error("That source format is no longer available.");
   throwIfAborted(options.signal);
@@ -60,6 +99,8 @@ async function downloadFormat(media, format, options = {}) {
   let totalBytes = format.bytes;
   if (media._info?.download) {
     stream = await media._info.download({ itag: format.itag });
+  } else if (format.raw?.workerSessionId) {
+    return downloadBrowserSession(format, options);
   } else {
     const target = format.raw?.url;
     if (!target) throw new Error("That source stream has expired. Inspect the link again.");

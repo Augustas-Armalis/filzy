@@ -40,8 +40,10 @@ describe("extract link inspection", () => {
     expect(inspectMediaLink("https://youtu.be/dQw4w9WgXcQ?t=3").state).toBe("supported");
   });
 
-  it("does not silently accept unconnected providers or arbitrary URLs", () => {
-    expect(inspectMediaLink("https://www.instagram.com/reel/example/").state).toBe("unsupported");
+  it("accepts connected social providers but rejects arbitrary URLs", () => {
+    expect(inspectMediaLink("https://www.instagram.com/reel/example/").state).toBe("supported");
+    expect(inspectMediaLink("https://www.tiktok.com/@creator/video/123").source.id).toBe("tiktok");
+    expect(inspectMediaLink("https://www.facebook.com/watch/?v=123").source.id).toBe("facebook");
     expect(inspectMediaLink("https://example.com/video").state).toBe("unsupported");
     expect(inspectMediaLink("example.com/video").state).toBe("invalid");
   });

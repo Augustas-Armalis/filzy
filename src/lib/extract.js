@@ -57,6 +57,13 @@ function knownSocialProvider(hostname) {
   return null;
 }
 
+function socialProviderId(label) {
+  if (label === "TikTok") return "tiktok";
+  if (label === "Instagram") return "instagram";
+  if (label === "Facebook") return "facebook";
+  return null;
+}
+
 export function inspectMediaLink(raw) {
   const value = String(raw || "").trim();
   if (!value) return { state: "empty", source: null, message: "" };
@@ -92,8 +99,16 @@ export function inspectMediaLink(raw) {
   }
 
   const provider = knownSocialProvider(url.hostname);
+  const providerId = socialProviderId(provider);
+  if (providerId) {
+    return {
+      state: "supported",
+      message: `${provider} detected`,
+      source: { id: providerId, label: provider, url: url.toString() },
+    };
+  }
   if (provider) {
-    return { state: "unsupported", source: null, message: `${provider} extraction is not connected yet. Use a YouTube link for now.` };
+    return { state: "unsupported", source: null, message: `${provider} extraction is not connected yet.` };
   }
 
   return { state: "unsupported", source: null, message: "This source is not supported yet. Use a YouTube video link." };
@@ -196,7 +211,7 @@ export function availableTargets(media) {
   return TARGETS.filter((target) => {
     if (target.value === "mp4") return hasMp4Video;
     if (target.value === "webm") return hasWebmVideo;
-    if (target.value === "m4a") return audio.some((format) => format.container === "mp4" || format.audioCodecLabel === "AAC");
+    if (target.value === "m4a") return audio.some((format) => !format.raw?.derivedFromVideo && (format.container === "mp4" || format.audioCodecLabel === "AAC"));
     return target.value === "mp3" && audio.length > 0;
   });
 }
@@ -303,7 +318,9 @@ export function findFormat(media, id) {
 }
 
 export async function resolveMedia(source, options = {}) {
-  if (!source || source.id !== "youtube") throw new Error("This source is not supported yet.");
-  const { resolveYouTube } = await import("@/lib/youtubeResolver");
-  return resolveYouTube(source, options);
+  if (!source) throw new Error("This source is not supported yet.");
+  const resolver = await import("@/lib/youtubeResolver");
+  if (source.id === "youtube") return resolver.resolveYouTube(source, options);
+  if (["tiktok", "instagram", "facebook"].includes(source.id)) return resolver.resolveSocialMedia(source, options);
+  throw new Error("This source is not supported yet.");
 }

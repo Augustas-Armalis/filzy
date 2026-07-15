@@ -94,7 +94,7 @@ async function resolveThroughWorker(source, { signal, onPhase } = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `The extraction Worker returned ${response.status}.`);
   const formats = (payload.formats || [])
-    .map(normalizeWorkerFormat)
+    .map((format) => normalizeWorkerFormat({ ...format, workerSessionId: payload.browserSessionId }))
     .filter((format) => format.itag && format.container && format.raw?.url && (format.hasVideo || format.hasAudio));
   if (!formats.length) throw new Error("No downloadable source formats were returned for this video.");
   return {
@@ -105,6 +105,33 @@ async function resolveThroughWorker(source, { signal, onPhase } = {}) {
     author: payload.author || "YouTube",
     durationSeconds: Number(payload.durationSeconds || 0),
     thumbnail: payload.thumbnail || source.thumbnail,
+    formats,
+    _context: { signal: null },
+  };
+}
+
+export async function resolveSocialMedia(source, { signal, onPhase } = {}) {
+  if (signal?.aborted) throw abortError();
+  onPhase?.(`Reading ${source.label}…`);
+  const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+  endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/resolve-social`;
+  endpoint.search = "";
+  endpoint.searchParams.set("url", source.url);
+  const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Could not read this ${source.label} post.`);
+  const formats = (payload.formats || [])
+    .map((format) => normalizeWorkerFormat({ ...format, workerSessionId: payload.browserSessionId }))
+    .filter((format) => format.itag && format.raw?.url);
+  if (!formats.length) throw new Error("This post did not expose a public media file.");
+  return {
+    id: `${source.id}:${source.url}`,
+    provider: source,
+    url: source.url,
+    title: payload.title || `${source.label} video`,
+    author: payload.author || source.label,
+    durationSeconds: Number(payload.durationSeconds || 0),
+    thumbnail: payload.thumbnail || "",
     formats,
     _context: { signal: null },
   };
