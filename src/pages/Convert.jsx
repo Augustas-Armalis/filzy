@@ -3,7 +3,6 @@ import { useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Check, Download, FolderArchive, Plus, RefreshCw, Settings2, X } from "lucide-react";
 import { ToolShell } from "@/components/ToolShell";
-import { SeoLandingContent } from "@/components/SeoContent";
 import { GlassCard, CtaButton, GhostButton, Dropzone, ProgressBar } from "@/components/ui";
 import { ConvertFormatPicker, FormatGlyph } from "@/components/ConvertFormatPicker";
 import { ConversionSettings, defaultConversionSettings } from "@/components/ConversionSettings";
@@ -572,7 +571,6 @@ export default function Convert() {
       <input ref={inputRef} type="file" multiple hidden accept={acceptForFormat(sourceFormat)} onChange={onInputChange} />
     </ToolShell>
     </div>
-    <SeoLandingContent page={seoPage} />
     </>
   );
 }

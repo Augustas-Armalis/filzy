@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Check, Download, FolderArchive, Gauge, Plus, Settings2, X } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { ToolShell } from "@/components/ToolShell";
-import { SeoLandingContent } from "@/components/SeoContent";
 import { CtaButton, Dropzone, FormatMenu, GhostButton, GlassCard, ProgressBar, Segmented } from "@/components/ui";
 import { splitName, Thumb } from "@/components/BeamUpload";
 import { cn } from "@/lib/cn";
@@ -870,7 +869,6 @@ export default function Compress() {
           <input ref={inputRef} type="file" multiple hidden accept={COMPRESS_ACCEPT} onChange={onInputChange} />
         </ToolShell>
       </div>
-      <SeoLandingContent page={seoPage} />
     </>
   );
 }

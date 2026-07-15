@@ -1,6 +1,6 @@
 import { cancelFFmpeg, fileToUint8, loadFFmpeg, onFFmpegProgress } from "@/lib/ffmpeg";
 import { convertFile } from "@/lib/convert";
-import { audioChoices, findFormat } from "@/lib/extract";
+import { audioChoices, EXTRACT_PROXY, findFormat } from "@/lib/extract";
 
 function abortError() {
   return new DOMException("Extraction cancelled", "AbortError");
@@ -54,9 +54,27 @@ async function collectStream(stream, totalBytes, { signal, onProgress } = {}) {
 async function downloadFormat(media, format, options = {}) {
   if (!format) throw new Error("That source format is no longer available.");
   throwIfAborted(options.signal);
-  media._context.signal = options.signal || null;
-  const stream = await media._info.download({ itag: format.itag });
-  const chunks = await collectStream(stream, format.bytes, options);
+  if (media._context) media._context.signal = options.signal || null;
+
+  let stream;
+  let totalBytes = format.bytes;
+  if (media._info?.download) {
+    stream = await media._info.download({ itag: format.itag });
+  } else {
+    const target = format.raw?.url;
+    if (!target) throw new Error("That source stream has expired. Inspect the link again.");
+    const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+    endpoint.searchParams.set("url", target);
+    const response = await fetch(endpoint, { signal: options.signal });
+    if (!response.ok || !response.body) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "The source stream could not be downloaded.");
+    }
+    stream = response.body;
+    totalBytes = Number(response.headers.get("content-length") || totalBytes || 0);
+  }
+
+  const chunks = await collectStream(stream, totalBytes, options);
   throwIfAborted(options.signal);
   return new Blob(chunks, { type: format.mimeType });
 }

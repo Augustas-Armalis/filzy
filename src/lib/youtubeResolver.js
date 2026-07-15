@@ -63,12 +63,66 @@ function largestThumbnail(thumbnails = []) {
   return [...thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url || "";
 }
 
+function resolveEndpoint(videoId) {
+  const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+  endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/resolve`;
+  endpoint.search = "";
+  endpoint.searchParams.set("videoId", videoId);
+  return endpoint.toString();
+}
+
+function normalizeWorkerFormat(format) {
+  const mimeType = format?.mimeType || "application/octet-stream";
+  const hasVideo = mimeType.startsWith("video/") || Boolean(format?.width || format?.height);
+  const hasAudio = mimeType.startsWith("audio/") || Boolean(format?.audioQuality || format?.audioChannels || format?.audioSampleRate);
+  return normalizeYouTubeFormat({
+    ...format,
+    mime_type: mimeType,
+    approx_duration_ms: format?.approxDurationMs,
+    average_bitrate: format?.averageBitrate,
+    content_length: format?.contentLength,
+    audio_channels: format?.audioChannels,
+    audio_sample_rate: format?.audioSampleRate,
+    has_video: hasVideo,
+    has_audio: hasAudio,
+  });
+}
+
+async function resolveThroughWorker(source, { signal, onPhase } = {}) {
+  onPhase?.("Checking available formats…");
+  const response = await fetch(resolveEndpoint(source.videoId), { signal, headers: { accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `The extraction Worker returned ${response.status}.`);
+  const formats = (payload.formats || [])
+    .map(normalizeWorkerFormat)
+    .filter((format) => format.itag && format.container && format.raw?.url && (format.hasVideo || format.hasAudio));
+  if (!formats.length) throw new Error("No downloadable source formats were returned for this video.");
+  return {
+    id: `youtube:${source.videoId}`,
+    provider: source,
+    url: source.url,
+    title: payload.title || "YouTube video",
+    author: payload.author || "YouTube",
+    durationSeconds: Number(payload.durationSeconds || 0),
+    thumbnail: payload.thumbnail || source.thumbnail,
+    formats,
+    _context: { signal: null },
+  };
+}
+
 export async function resolveYouTube(source, { signal, onPhase } = {}) {
   if (signal?.aborted) throw abortError();
   onPhase?.("Reading source…");
 
   const context = { signal };
   try {
+    try {
+      return await resolveThroughWorker(source, { signal, onPhase });
+    } catch (workerError) {
+      if (signal?.aborted || workerError?.name === "AbortError") throw abortError();
+      onPhase?.("Trying another source route…");
+    }
+
     const { Innertube, UniversalCache } = await import("youtubei.js/web");
     if (signal?.aborted) throw abortError();
     onPhase?.("Checking available formats…");

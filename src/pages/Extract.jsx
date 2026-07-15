@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { ToolShell } from "@/components/ToolShell";
-import { SeoLandingContent } from "@/components/SeoContent";
 import { CtaButton, FormatMenu, GlassCard, ProgressBar, Segmented } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { seoPageForPath } from "@/content/seoCatalog";
@@ -606,9 +605,9 @@ export default function Extract() {
           />
         </form>
 
-        <div className="min-h-[14px] px-[4px]" aria-live="polite">
-          <AnimatePresence mode="wait" initial={false}>
-            {(resolving || liveMessage) && (
+        <AnimatePresence mode="wait" initial={false}>
+          {(resolving || liveMessage) && (
+            <div className="px-[4px]" aria-live="polite">
               <motion.p
                 key={resolving ? resolveStatus : liveMessage}
                 initial={{ opacity: 0, filter: "blur(5px)" }}
@@ -619,9 +618,9 @@ export default function Extract() {
                 {resolving && <Loader size={11} strokeWidth={1.4} absoluteStrokeWidth className="animate-spin" aria-hidden="true" />}
                 {resolving ? resolveStatus : liveMessage}
               </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {hasItems && (
           <ScrollFadeList>
@@ -651,7 +650,6 @@ export default function Extract() {
       </GlassCard>
     </ToolShell>
     </div>
-    <SeoLandingContent page={seoPage} />
     </>
   );
 }

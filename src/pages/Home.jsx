@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Cloud, Radio, WavesLadder, Loader } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { DropBox, FileList } from "@/components/BeamUpload";
-import { SeoLandingContent } from "@/components/SeoContent";
 import { Streaming, StreamStopped } from "@/components/Streaming";
 import { basePages, seoPageForPath } from "@/content/seoCatalog";
 import { useBeamHost } from "@/hooks/useBeamHost";
@@ -345,7 +344,6 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
-      {phase === "upload" && <SeoLandingContent page={seoPage} />}
 
       <input ref={inputRef} type="file" multiple hidden onChange={onInputChange} />
     </>

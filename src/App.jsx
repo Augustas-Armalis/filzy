@@ -13,16 +13,13 @@ const Blog = lazy(() => import("@/pages/Blog"));
 const Guide = lazy(() => import("@/pages/Guide"));
 
 const pageMotion = {
-  initial: { opacity: 0, filter: "blur(12px)" },
+  initial: { opacity: 0 },
   animate: {
     opacity: 1,
-    filter: "blur(0px)",
-    transitionEnd: { filter: "none" },
     transition: { duration: 0.24, ease: [0.22, 0.72, 0.24, 1], delay: 0.04 },
   },
   exit: {
     opacity: 0,
-    filter: "blur(10px)",
     transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
   },
 };
@@ -36,7 +33,7 @@ function AnimatedRoutes() {
         <motion.div
           key={location.pathname}
           {...pageMotion}
-          className="flex min-h-0 flex-1 flex-col will-change-[opacity,filter]"
+          className="flex min-h-0 flex-1 flex-col will-change-[opacity]"
         >
           <Suspense fallback={<div className="flex flex-1" />}>
             <Routes location={location}>
