@@ -21,6 +21,7 @@ export default function ReceivePage() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState({}); // id -> "downloading" | "done"
   const [progress, setProgress] = useState({}); // id -> 0..1
+  const [speed, setSpeed] = useState(0); // live receive speed, bytes/sec
   const [allBusy, setAllBusy] = useState(false);
 
   const rxRef = useRef(null);
@@ -40,6 +41,7 @@ export default function ReceivePage() {
     setNote("");
     setStatus({});
     setProgress({});
+    setSpeed(0);
     setAllBusy(false);
     blobs.current = new Map();
     filesRef.current = [];
@@ -65,7 +67,8 @@ export default function ReceivePage() {
         }
         downloadBlob("filzy-files.zip", zipSync(entries));
         setAllBusy(false);
-        // phase is already "done" (set the instant the user clicked Download all)
+        // The card stayed visible with live progress the whole time; onAllComplete
+        // flips to the celebratory "done" screen once every byte has landed.
       } else if (job.mode === "single") {
         const b = blobs.current.get(job.ids[0]);
         if (b) downloadBlob(nameOf(job.ids[0]), b);
@@ -90,9 +93,10 @@ export default function ReceivePage() {
         setNote(m.message || "");
         setPhase("ready");
       },
-      onFileProgress: (fid, received, total) => {
+      onFileProgress: (fid, received, total, spd) => {
         setStatus((s) => (s[fid] === "done" ? s : { ...s, [fid]: "downloading" }));
         setProgress((p) => ({ ...p, [fid]: total ? Math.min(1, received / total) : 0 }));
+        if (typeof spd === "number" && spd > 0) setSpeed(spd);
       },
       onFileComplete: (fid, blob) => {
         if (blob) blobs.current.set(fid, blob); // null when streamed straight to disk
@@ -103,6 +107,13 @@ export default function ReceivePage() {
           job.done.add(fid);
           if (job.done.size >= job.ids.length) void finishJob(job);
         }
+      },
+      // Every advertised file has arrived — drop the speed readout and show the
+      // celebratory "done" screen (a legitimate end state, not the old premature
+      // jump that hid all progress mid-transfer).
+      onAllComplete: () => {
+        setSpeed(0);
+        setPhase((p) => (p === "error" || p === "interrupted" ? p : "done"));
       },
       onError: () => setPhase("error"),
       onSevered: () => setPhase((p) => (p === "done" ? p : "interrupted")),
@@ -152,7 +163,9 @@ export default function ReceivePage() {
   };
   const downloadAll = () => {
     if (filesRef.current.length === 0) return;
-    setPhase("done"); // show the "download started" screen instantly; the zip finishes in the background
+    // Stay on the receive card so the user watches real progress (overall bar +
+    // speed + per-file bars) instead of the old stuck "Download started" screen.
+    setAllBusy(true);
     queue.current.push({ ids: filesRef.current.map((f) => f.id), mode: "all", done: new Set() });
     rxRef.current?._pump?.();
   };
@@ -168,6 +181,7 @@ export default function ReceivePage() {
             files={files}
             status={status}
             progress={progress}
+            speed={speed}
             allBusy={allBusy}
             onDownloadOne={downloadOne}
             onDownloadAll={downloadAll}

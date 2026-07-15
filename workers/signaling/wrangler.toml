@@ -1,0 +1,24 @@
+name = "filzy-signaling"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# One Durable Object "room" per Beam id — it relays the WebRTC handshake
+# (SDP/ICE) between the two peers. NO FILE BYTES pass through here; the transfer
+# itself is pure peer-to-peer. Free tier eligible: the class is SQLite-backed
+# (required for the free plan) and uses WebSocket Hibernation, so an idle room
+# costs nothing while still holding the connection open.
+[[durable_objects.bindings]]
+name = "BEAM_ROOMS"
+class_name = "BeamRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BeamRoom"]
+
+# --- TURN (optional, lights up cross-network / strict-NAT beams) -------------
+# The /turn endpoint stays dormant (returns no relay) until these two secrets
+# are set, so signaling works immediately and TURN is one command away:
+#   wrangler secret put TURN_KEY_ID       (the TURN key uid from the dashboard)
+#   wrangler secret put TURN_KEY_SECRET   (the TURN key secret)
+# Credentials are minted short-lived per beam — nothing reusable ships to the
+# browser, so the relay quota can't be scraped and abused.

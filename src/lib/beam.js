@@ -1,4 +1,4 @@
-import { createSignaling, ICE_CONFIG } from "./signaling";
+import { createSignaling, getIceConfig } from "./signaling";
 import { sha256Hex } from "./hash";
 
 /* ============================================================================
@@ -48,9 +48,22 @@ export class BeamHost {
 
     this.sig = createSignaling(beamId, selfId);
     this.sig.onMessage((m) => this.onSignal(m));
-    // Announce we're live and invite anyone already waiting.
-    this.sig.send({ kind: "hello", beam: beamId, from: selfId });
+    // Announce we're live and invite anyone already waiting. Re-announce a few
+    // times: brokers take a moment to connect and a lone hello can be missed if
+    // a receiver is still subscribing, which would otherwise deadlock the
+    // handshake forever. Cheap (~KB) and stops as soon as someone joins.
+    this.announce();
     this.startSpeedLoop();
+  }
+
+  announce() {
+    let tries = 0;
+    const ping = () => {
+      if (this.closed || this.peers.size > 0) return;
+      this.sig.send({ kind: "hello", beam: this.beamId, from: this.selfId });
+      if (++tries < 6) setTimeout(ping, 1500);
+    };
+    ping();
   }
 
   setThrottle(bytesPerSec) {
@@ -110,24 +123,52 @@ export class BeamHost {
       await this.createPeer(m.from);
     } else if (m.kind === "answer" && m.to === this.selfId) {
       const p = this.peers.get(m.from);
-      if (p) await p.pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
+      if (p) {
+        await p.pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
+        // Remote description is now set — flush any ICE candidates that raced
+        // ahead of the answer (they'd otherwise have been dropped and the
+        // connection would hang until timeout).
+        await this.drainCandidates(p);
+      }
     } else if (m.kind === "ice" && m.to === this.selfId) {
       const p = this.peers.get(m.from);
-      if (p && m.candidate) {
-        try {
-          await p.pc.addIceCandidate(new RTCIceCandidate(m.candidate));
-        } catch {
-          /* ignore late candidates */
-        }
-      }
+      if (p && m.candidate) await this.addCandidate(p, m.candidate);
     } else if (m.kind === "bye") {
       this.kick(m.from);
     }
   }
 
+  // Add an ICE candidate — but only once the remote description exists. Adding
+  // one before setRemoteDescription throws and the candidate is lost, so queue
+  // early arrivals and flush them in drainCandidates(). This is the difference
+  // between a reliable cross-network connect and a hang-until-timeout.
+  async addCandidate(p, candidate) {
+    if (!p.pc.remoteDescription) {
+      (p.pendingCandidates ||= []).push(candidate);
+      return;
+    }
+    try {
+      await p.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch {
+      /* candidate no longer applicable */
+    }
+  }
+
+  async drainCandidates(p) {
+    const pending = p.pendingCandidates || [];
+    p.pendingCandidates = [];
+    for (const c of pending) {
+      try {
+        await p.pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch {
+        /* candidate no longer applicable */
+      }
+    }
+  }
+
   async createPeer(remoteId) {
     if (this.peers.has(remoteId)) return;
-    const pc = new RTCPeerConnection(ICE_CONFIG);
+    const pc = new RTCPeerConnection(await getIceConfig());
     const channel = pc.createDataChannel("beam", { ordered: true });
     channel.binaryType = "arraybuffer";
 
@@ -370,16 +411,36 @@ export class BeamReceiver {
     this.closed = false;
     this._lastSpeed = 0;
     this.sinks = new Map(); // fileId -> writable stream (progressive save-to-disk)
+    this.pendingCandidates = []; // ICE that arrived before the offer's SDP was set
 
     this.sig = createSignaling(beamId, selfId);
-    this.pc = new RTCPeerConnection(ICE_CONFIG);
     this.cb.onConnecting?.();
+    // The ICE config is fetched async (it pulls short-lived Cloudflare TURN
+    // creds), so the peer connection is built in init(). Signals are only wired
+    // once pc exists, so an early offer can't race ahead of it.
+    this.ready = this.init();
+  }
+
+  async init() {
+    this.pc = new RTCPeerConnection(await getIceConfig());
     this.wirePc();
     this.sig.onMessage((m) => this.onSignal(m));
-    // Announce presence; host will offer.
-    void this.sig.ready.then(() => {
-      this.sig.send({ kind: "join", beam: beamId, from: selfId });
-    });
+    await this.sig.ready;
+    // Announce presence; host will offer. Retry a few times: transports take a
+    // moment to connect and the host may not be subscribed at the instant we
+    // first join, which would otherwise leave us stuck on "Connecting…". Stops
+    // the moment the data channel is open.
+    this.announce();
+  }
+
+  announce() {
+    let tries = 0;
+    const ping = () => {
+      if (this.closed || (this.channel && this.channel.readyState === "open")) return;
+      this.sig.send({ kind: "join", beam: this.beamId, from: this.selfId });
+      if (++tries < 8) setTimeout(ping, 1500);
+    };
+    ping();
   }
 
   wirePc() {
@@ -420,21 +481,47 @@ export class BeamReceiver {
       // Host came online after us — re-announce.
       this.sig.send({ kind: "join", beam: this.beamId, from: this.selfId });
     } else if (m.kind === "offer" && (m.to === this.selfId || !m.to)) {
+      // Ignore a duplicate/second offer once we're already handshaking with a
+      // host (the host re-announces, and offers can arrive via several brokers).
+      if (this.hostId && this.pc.remoteDescription) return;
       this.hostId = m.from;
       await this.pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
       this.sig.send({ kind: "answer", beam: this.beamId, from: this.selfId, to: m.from, sdp: answer });
+      // SDP is set — flush any ICE that arrived ahead of the offer.
+      await this.drainCandidates();
     } else if (m.kind === "ice" && m.to === this.selfId) {
-      if (m.candidate) {
-        try {
-          await this.pc.addIceCandidate(new RTCIceCandidate(m.candidate));
-        } catch {
-          /* ignore */
-        }
-      }
+      if (m.candidate) await this.addCandidate(m.candidate);
     } else if (m.kind === "bye") {
       if (!this.closed) this.cb.onError?.(new Error("Host left"));
+    }
+  }
+
+  // Same early-arrival guard as the host: queue ICE until the offer's remote
+  // description is in place, then flush — otherwise the connection can silently
+  // lose candidates and never leave "Connecting…".
+  async addCandidate(candidate) {
+    if (!this.pc.remoteDescription) {
+      this.pendingCandidates.push(candidate);
+      return;
+    }
+    try {
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch {
+      /* candidate no longer applicable */
+    }
+  }
+
+  async drainCandidates() {
+    const pending = this.pendingCandidates;
+    this.pendingCandidates = [];
+    for (const c of pending) {
+      try {
+        await this.pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch {
+        /* candidate no longer applicable */
+      }
     }
   }
 
@@ -589,7 +676,7 @@ export class BeamReceiver {
     this.stopProgressLoop();
     try {
       this.channel?.close();
-      this.pc.close();
+      this.pc?.close();
     } catch {
       /* noop */
     }

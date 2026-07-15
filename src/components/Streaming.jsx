@@ -9,6 +9,16 @@ import { QRCode } from "@/components/QRCode";
 // Shown as the recipient subtitle when the sharer left no note.
 const DEFAULT_NOTE = "Access & download now, before it’s turn off";
 
+// Compact "time left" from seconds: 45s, 3m 20s, 1h 4m.
+function formatEta(secs) {
+  if (!isFinite(secs) || secs <= 0) return "";
+  const s = Math.round(secs);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 const STATUS = {
   downloading: { Icon: Download, label: "Downloading…", dot: "bg-blue-500", pulse: true },
   downloaded: { Icon: BadgeCheck, label: "Downloaded!", dot: "bg-yellow-400" },
@@ -466,10 +476,39 @@ function ReceiveRow({ item, status, progress, onDownload }) {
   );
 }
 
-export function Receive({ note, files, status, progress, allBusy, onDownloadOne, onDownloadAll }) {
+export function Receive({ note, files, status, progress, speed, allBusy, onDownloadOne, onDownloadAll }) {
+  // "Engaged" files = anything the user has started or finished. Overall progress
+  // is byte-weighted across them (progress[id] is received/size), so a small file
+  // finishing doesn't jump the bar the way a plain file-count would.
+  const engaged = files.filter((f) => status[f.id] === "downloading" || status[f.id] === "done");
+  const totalBytes = engaged.reduce((a, f) => a + f.size, 0);
+  const doneBytes = engaged.reduce((a, f) => a + f.size * (progress[f.id] ?? 0), 0);
+  const overall = totalBytes ? doneBytes / totalBytes : 0;
+  const active = files.some((f) => status[f.id] === "downloading");
+  const eta = active && speed > 0 ? formatEta((totalBytes - doneBytes) / speed) : "";
+  const pct = Math.round(overall * 100);
+
   return (
     <div className={CARD}>
       <StatusBox Icon={Radio} title="Anonymous is streaming you files!" subtitle={(note && note.trim()) || DEFAULT_NOTE} />
+
+      {/* Live transfer detail for the recipient: speed, overall %, ETA — so they
+          watch it move instead of waiting on a blank screen. */}
+      {engaged.length > 0 && (
+        <div className="flex flex-col gap-[6px]">
+          <div className="flex gap-[4px]">
+            <StatPill Icon={Signal} green={active}>{formatBytes(speed || 0)}/s</StatPill>
+            <StatPill Icon={Download}>{pct}%</StatPill>
+          </div>
+          <div className="flex items-center gap-[8px] rounded-[10px] border border-border bg-white px-[10px] py-[8px]">
+            <div className="min-w-0 flex-1">
+              <ProgressBar value={overall} />
+            </div>
+            <span className="shrink-0 text-[11px] tabular-nums text-alt-text">{active && eta ? `${eta} left` : `${pct}%`}</span>
+          </div>
+        </div>
+      )}
+
       {files.length > 0 && (
         <ScrollFade className="flex max-h-[260px] flex-col gap-[4px]">
           {files.map((f) => (
@@ -478,7 +517,7 @@ export function Receive({ note, files, status, progress, allBusy, onDownloadOne,
         </ScrollFade>
       )}
       <button type="button" onClick={onDownloadAll} className={cn(CTA, "w-full")}>
-        {allBusy ? "Downloading…" : "Download all"}
+        {allBusy ? `Downloading… ${pct}%` : "Download all"}
       </button>
     </div>
   );

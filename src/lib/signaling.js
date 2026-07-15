@@ -14,7 +14,18 @@
    same-browser beam is instant and a cross-device beam still connects.
    ========================================================================== */
 
-const MQTT_BROKER = "wss://broker.emqx.io:8084/mqtt";
+/* Several free public MQTT brokers, tried in parallel. Two different devices
+   only need ONE broker in common to complete the handshake, so running a few at
+   once means a single broker being down, blocked, or rate-limited on one
+   network no longer kills the beam — another carries it. Duplicate messages
+   (the same handshake arriving via multiple brokers) are dropped by the __id
+   dedup in CombinedSignaling. Only the ~KB SDP/ICE handshake ever touches these
+   — never file bytes. */
+const MQTT_BROKERS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt",
+  "wss://test.mosquitto.org:8081/mqtt",
+];
 
 class BroadcastChannelSignaling {
   constructor(beamId, selfId) {
@@ -44,7 +55,7 @@ class BroadcastChannelSignaling {
 }
 
 class MqttSignaling {
-  constructor(beamId, selfId) {
+  constructor(beamId, selfId, broker = MQTT_BROKERS[0]) {
     this.selfId = selfId;
     this.cb = null;
     this.topic = `filzy/beam/${beamId}`;
@@ -56,7 +67,7 @@ class MqttSignaling {
     // Lazy-load mqtt so it never bloats the initial page — only when beaming.
     import("mqtt")
       .then(({ default: mqtt }) => {
-        this.client = mqtt.connect(MQTT_BROKER, { reconnectPeriod: 2000, connectTimeout: 8000 });
+        this.client = mqtt.connect(broker, { reconnectPeriod: 2000, connectTimeout: 8000 });
         this.client.on("connect", () => {
           this.client.subscribe(this.topic, () => {});
           this.up = true;
@@ -156,10 +167,23 @@ class CombinedSignaling {
     } catch {
       /* BroadcastChannel unavailable */
     }
+    // Primary cross-device path: the Cloudflare signaling Worker (reliable,
+    // low-latency, hibernating Durable Object per beam). This is what makes
+    // "connect on any other device" actually work.
     try {
-      this.transports.push(new MqttSignaling(beamId, selfId));
+      if (SIGNAL_URL && typeof WebSocket !== "undefined")
+        this.transports.push(new WebSocketSignaling(SIGNAL_URL, beamId, selfId));
     } catch {
-      /* MQTT unavailable — same-browser still works via BroadcastChannel */
+      /* Worker unreachable — the public-broker fallback below still connects */
+    }
+    // One public MQTT broker as a last-resort fallback if the Worker is blocked
+    // on a network. Deduped against the Worker path by __id.
+    for (const broker of MQTT_BROKERS.slice(0, 1)) {
+      try {
+        this.transports.push(new MqttSignaling(beamId, selfId, broker));
+      } catch {
+        /* broker unavailable — BroadcastChannel + Worker still work */
+      }
     }
     for (const t of this.transports) {
       t.onMessage((m) => {
@@ -167,6 +191,9 @@ class CombinedSignaling {
         if (id) {
           if (this.seen.has(id)) return;
           this.seen.add(id);
+          // Bound the dedup set — a handshake is only dozens of messages, but
+          // never let it grow without limit across a long-lived beam.
+          if (this.seen.size > 500) this.seen = new Set([id]);
         }
         this.cb?.(m);
       });
@@ -184,15 +211,13 @@ class CombinedSignaling {
   }
 }
 
+// The Cloudflare signaling Worker. Defaults to the deployed instance so both
+// the live site and local dev use it automatically; override with VITE_SIGNAL_URL.
+const SIGNAL_URL = import.meta.env.VITE_SIGNAL_URL || "wss://filzy-signaling.trycapto.workers.dev";
+
 export function createSignaling(beamId, selfId) {
-  const url = import.meta.env.VITE_SIGNAL_URL;
-  if (url && typeof WebSocket !== "undefined") {
-    try {
-      return new WebSocketSignaling(url, beamId, selfId);
-    } catch {
-      /* fall through */
-    }
-  }
+  // Always combined: BroadcastChannel (instant same-tab) + the Worker
+  // (reliable cross-device) + one public broker (last-resort fallback).
   return new CombinedSignaling(beamId, selfId);
 }
 
@@ -232,9 +257,17 @@ const meteredTurn =
 
 export const ICE_CONFIG = {
   iceServers: [
-    // Bundle several Google STUN endpoints so candidate gathering doesn't stall
-    // on a single slow/unreachable server — first to answer wins.
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+    // Bundle several public STUN endpoints so candidate gathering doesn't stall
+    // on a single slow/unreachable server — first to answer wins. Mixing
+    // providers (Google + Cloudflare) also survives one provider being blocked.
+    {
+      urls: [
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302",
+        "stun:stun2.l.google.com:19302",
+        "stun:stun.cloudflare.com:3478",
+      ],
+    },
     ...meteredTurn,
     ...(import.meta.env.VITE_TURN_URL
       ? [{ urls: import.meta.env.VITE_TURN_URL, username: TURN_USER, credential: TURN_CRED }]
@@ -246,3 +279,36 @@ export const ICE_CONFIG = {
   // is nailed up the moment signaling completes instead of after a gather round.
   iceCandidatePoolSize: 4,
 };
+
+/* Build the live ICE config for a peer connection. Starts from the static
+   STUN/env config above, then asks the signaling Worker for short-lived
+   Cloudflare TURN credentials and folds them in. TURN is what lets peers behind
+   strict/symmetric NATs (cellular, locked-down Wi-Fi) connect at all — it's a
+   fallback the browser only uses when a direct path is impossible, so it costs
+   nothing on the common case. Cached for the tab; a reload refreshes it. If the
+   Worker has no TURN configured (or is unreachable) this is just the STUN config,
+   so beams still work on friendly networks. */
+let _iceConfigPromise = null;
+export function getIceConfig() {
+  if (_iceConfigPromise) return _iceConfigPromise;
+  _iceConfigPromise = (async () => {
+    const iceServers = [...ICE_CONFIG.iceServers];
+    try {
+      const httpBase = SIGNAL_URL.replace(/^ws/, "http").replace(/\/$/, "");
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(`${httpBase}/turn`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        const s = data && data.iceServers;
+        if (Array.isArray(s)) iceServers.push(...s);
+        else if (s) iceServers.push(s);
+      }
+    } catch {
+      /* no TURN available — STUN-only config still connects friendly networks */
+    }
+    return { iceServers, iceCandidatePoolSize: 4 };
+  })();
+  return _iceConfigPromise;
+}
