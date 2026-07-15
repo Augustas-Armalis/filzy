@@ -16,59 +16,76 @@
     </script>
 
     <!-- Primary meta -->
-    <title>Filzy</title>
+    <title>Send Large Files Free with Beam | Filzy</title>
     <meta
       name="description"
-      content="Send unlimited size files across devices &amp; the world"
+      content="Send large files and folders directly between devices with a live Filzy Beam. Free, no account, and no Filzy file storage."
     />
     <meta name="application-name" content="Filzy" />
     <meta name="apple-mobile-web-app-title" content="Filzy" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="theme-color" content="#050505" />
     <link rel="canonical" href="https://filzy.site/" />
 
     <!-- Icons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon-32x32%201.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicon-16x16%201.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/branding/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/branding/apple-touch-icon%201.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <link rel="alternate" type="application/rss+xml" title="Filzy guides" href="/feed.xml" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Filzy" />
-    <meta property="og:title" content="Filzy" />
+    <meta property="og:title" content="Send Large Files Free with Beam | Filzy" />
     <meta
       property="og:description"
-      content="Send unlimited size files across devices &amp; the world"
+      content="Send large files and folders directly between devices with a live Filzy Beam. Free, no account, and no Filzy file storage."
     />
     <meta property="og:url" content="https://filzy.site/" />
     <meta property="og:image" content="https://filzy.site/branding/og-image.png" />
     <meta property="og:image:width" content="1056" />
     <meta property="og:image:height" content="554" />
-    <meta property="og:image:alt" content="Filzy" />
+    <meta property="og:image:alt" content="Filzy Beam for direct file transfer" />
     <meta property="og:locale" content="en_US" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Filzy" />
+    <meta name="twitter:title" content="Send Large Files Free with Beam | Filzy" />
     <meta
       name="twitter:description"
-      content="Send unlimited size files across devices &amp; the world"
+      content="Send large files and folders directly between devices with a live Filzy Beam. Free, no account, and no Filzy file storage."
     />
     <meta name="twitter:image" content="https://filzy.site/branding/og-image.png" />
+    <meta name="twitter:image:alt" content="Filzy Beam for direct file transfer" />
 
     <!-- Structured data -->
-    <script type="application/ld+json">
+    <script type="application/ld+json" data-site-schema>
       {
         "@context": "https://schema.org",
-        "@type": "WebSite",
-        "name": "Filzy",
-        "url": "https://filzy.site/",
-        "description": "Send unlimited size files across devices & the world"
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://filzy.site/#organization",
+            "name": "Filzy",
+            "url": "https://filzy.site/",
+            "logo": "https://filzy.site/branding/Filzy.svg",
+            "sameAs": ["https://www.instagram.com/filzy.site/"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://filzy.site/#website",
+            "name": "Filzy",
+            "url": "https://filzy.site/",
+            "description": "Direct file transfer, local file conversion, media compression, and source-aware media extraction.",
+            "publisher": { "@id": "https://filzy.site/#organization" }
+          }
+        ]
       }
     </script>
 

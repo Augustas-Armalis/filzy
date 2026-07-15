@@ -26,6 +26,10 @@
 }
 
 @layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     background-color: #050505;
     color: #ffffff;
@@ -38,5 +42,37 @@
   ::selection {
     background-color: var(--color-text);
     color: var(--color-white);
+  }
+
+  a[href],
+  button:not(:disabled),
+  select,
+  summary,
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .number-input-no-spinner {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  .number-input-no-spinner::-webkit-inner-spin-button,
+  .number-input-no-spinner::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -1,17 +1,11 @@
-// Lazy ffmpeg.wasm loader, shared by the Converter and Compressor.
-//
-// Loaded on demand from a CDN (kept out of the app bundle) so the base app
-// stays tiny and only users who actually convert/compress audio or video pay
-// the download. We use the SINGLE-THREADED core so it works without
-// cross-origin isolation (COOP/COEP) — which GitHub Pages can't set — meaning
-// it runs for everyone, free, no backend.
-
-const FF_VERSION = "0.12.15";
-const UTIL_VERSION = "0.12.2";
-const CORE_VERSION = "0.12.10"; // single-thread umd core
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+// Lazy, self-hosted ffmpeg.wasm loader shared by Converter and Compressor.
+// Vite emits the single-thread core and WASM as versioned Filzy assets, so
+// conversions do not depend on a third-party CDN or cross-origin isolation.
+import coreURL from "@ffmpeg/core?url";
+import wasmURL from "@ffmpeg/core/wasm?url";
 
 let ffmpegPromise = null;
+let ffmpegInstance = null;
 let progressCb = null;
 
 // Subscribe to conversion progress (0..1). Replaces any previous subscriber.
@@ -25,19 +19,18 @@ export async function loadFFmpeg(onStatus) {
   if (ffmpegPromise) return ffmpegPromise;
 
   ffmpegPromise = (async () => {
-    onStatus?.("Loading engine…");
-    const { FFmpeg } = await import(/* @vite-ignore */ `https://esm.sh/@ffmpeg/ffmpeg@${FF_VERSION}`);
-    const { toBlobURL } = await import(/* @vite-ignore */ `https://esm.sh/@ffmpeg/util@${UTIL_VERSION}`);
+    onStatus?.("Starting conversion…");
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
 
     const ffmpeg = new FFmpeg();
+    ffmpegInstance = ffmpeg;
     ffmpeg.on("progress", ({ progress }) => {
       if (progressCb && Number.isFinite(progress)) progressCb(Math.max(0, Math.min(1, progress)));
     });
 
-    onStatus?.("Downloading engine…");
     await ffmpeg.load({
-      coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
+      coreURL,
+      wasmURL,
     });
     onStatus?.("");
     return ffmpeg;
@@ -47,7 +40,21 @@ export async function loadFFmpeg(onStatus) {
     return await ffmpegPromise;
   } catch (err) {
     ffmpegPromise = null; // allow a retry on failure
+    ffmpegInstance = null;
     throw err;
+  }
+}
+
+// Stop the active conversion and reset the singleton so the next conversion
+// starts with a clean worker. terminate() is the only reliable way to cancel
+// an ffmpeg.wasm exec while it is in progress.
+export function cancelFFmpeg() {
+  try {
+    ffmpegInstance?.terminate();
+  } finally {
+    ffmpegInstance = null;
+    ffmpegPromise = null;
+    progressCb = null;
   }
 }
 

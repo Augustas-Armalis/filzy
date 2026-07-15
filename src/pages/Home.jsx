@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Cloud, Radio, WavesLadder, Loader } from "lucide-react";
-import { Shell } from "@/components/Shell";
+import { useLocation } from "react-router-dom";
 import { DropBox, FileList } from "@/components/BeamUpload";
+import { SeoLandingContent } from "@/components/SeoContent";
 import { Streaming, StreamStopped } from "@/components/Streaming";
+import { basePages, seoPageForPath } from "@/content/seoCatalog";
 import { useBeamHost } from "@/hooks/useBeamHost";
 import { cn } from "@/lib/cn";
 import { gatherDropItems, kindOf } from "@/lib/files";
+import { pageJsonLd, useSeo } from "@/lib/seo";
 
 const TABS = [
   {
@@ -96,6 +99,8 @@ function ComingSoonBox({ title, subtitle }) {
 }
 
 export default function Home() {
+  const location = useLocation();
+  const seoPage = seoPageForPath(location.pathname) || basePages[0];
   const [activeId, setActiveId] = useState("beam");
   const [phase, setPhase] = useState("upload"); // upload | live | stopped
   const [items, setItems] = useState([]);
@@ -112,6 +117,13 @@ export default function Home() {
   const view = TABS.find((t) => t.id === activeId);
   const comingSoon = view.comingSoon;
   const hasFiles = items.length > 0;
+
+  useSeo({
+    title: seoPage.title,
+    description: seoPage.description,
+    path: seoPage.path,
+    jsonLd: pageJsonLd(seoPage),
+  });
 
   const openPicker = () => inputRef.current?.click();
 
@@ -216,8 +228,8 @@ export default function Home() {
       : "pointer-events-none opacity-80";
 
   return (
-    <Shell>
-      <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
+    <>
+      <div className="flex min-h-[100svh] shrink-0 items-center justify-center px-[10px] pt-[60px] pb-[44px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
         <AnimatePresence mode="wait">
         {phase === "upload" ? (
         <motion.div key="upload" {...phaseSwap} className="w-full max-w-[280px]">
@@ -333,7 +345,9 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
+      {phase === "upload" && <SeoLandingContent page={seoPage} />}
+
       <input ref={inputRef} type="file" multiple hidden onChange={onInputChange} />
-    </Shell>
+    </>
   );
 }

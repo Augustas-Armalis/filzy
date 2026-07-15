@@ -7,23 +7,34 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "seo:indexnow": "node scripts/submit-indexnow.mjs"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "clsx": "^2.1.1",
     "framer-motion": "^12.41.0",
+    "imagetracerjs": "^1.2.6",
     "lucide-react": "^1.21.0",
     "mqtt": "^5.15.1",
+    "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "yaml": "^2.8.3",
+    "youtubei.js": "^17.2.0"
   },
   "devDependencies": {
+    "@cloudflare/puppeteer": "^1.1.0",
     "@tailwindcss/vite": "^4.3.1",
     "@vitejs/plugin-react": "^6.0.3",
+    "happy-dom": "^20.10.6",
     "tailwindcss": "^4.3.1",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "vitest": "^4.1.10"
   }
 }

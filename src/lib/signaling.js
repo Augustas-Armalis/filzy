@@ -213,7 +213,7 @@ class CombinedSignaling {
 
 // The Cloudflare signaling Worker. Defaults to the deployed instance so both
 // the live site and local dev use it automatically; override with VITE_SIGNAL_URL.
-const SIGNAL_URL = import.meta.env.VITE_SIGNAL_URL || "wss://filzy-signaling.trycapto.workers.dev";
+const SIGNAL_URL = import.meta.env.VITE_SIGNAL_URL || "wss://filzy-signaling.sendfilzy-cdf.workers.dev";
 
 export function createSignaling(beamId, selfId) {
   // Always combined: BroadcastChannel (instant same-tab) + the Worker

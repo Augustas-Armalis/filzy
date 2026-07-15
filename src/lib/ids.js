@@ -4,7 +4,7 @@ import { customAlphabet } from "nanoid";
 const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
 const nano = customAlphabet(ALPHABET, 8);
 
-// 8-char id for the share link: filzy.site/#/s/{beamId}
+// 8-char id for the share link: filzy.site/s/{beamId}
 export function beamId() {
   return nano();
 }

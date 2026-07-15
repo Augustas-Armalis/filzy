@@ -20,7 +20,7 @@ export function Thumb({ item }) {
   const { kind, url } = item;
 
   if (kind === "image" && url) {
-    return <img src={url} alt="" className="h-[42px] w-[42px] shrink-0 rounded-[7px] border border-white/20 object-cover" />;
+    return <img src={url} alt="" width="42" height="42" className="h-[42px] w-[42px] shrink-0 rounded-[7px] border border-white/20 object-cover" />;
   }
   if (kind === "video" && url) {
     return (
@@ -30,6 +30,8 @@ export function Thumb({ item }) {
         autoPlay
         loop
         playsInline
+        width="42"
+        height="42"
         className="h-[42px] w-[42px] shrink-0 rounded-[7px] border border-white/20 object-cover"
       />
     );

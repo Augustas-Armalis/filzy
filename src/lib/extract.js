@@ -1,79 +1,309 @@
-/*
-  Media extractor helpers.
+const SOCIAL_HOSTS = new Map([
+  ["tiktok.com", "TikTok"],
+  ["instagram.com", "Instagram"],
+  ["x.com", "X"],
+  ["twitter.com", "X"],
+  ["facebook.com", "Facebook"],
+  ["fb.watch", "Facebook"],
+  ["vimeo.com", "Vimeo"],
+  ["soundcloud.com", "SoundCloud"],
+  ["twitch.tv", "Twitch"],
+  ["reddit.com", "Reddit"],
+  ["dailymotion.com", "Dailymotion"],
+]);
 
-  Platform detection runs entirely client-side (regex on the pasted URL) so the
-  UI reacts instantly. The actual media grab, however, CANNOT run in the browser
-  — YouTube & co. block cross-origin stream access and cipher their URLs — so it
-  is delegated to a Cloudflare Worker (yt-dlp-style) at VITE_EXTRACT_API. Until
-  that Worker is deployed, requestExtraction returns a structured "not connected"
-  result so the page can say so honestly instead of hanging.
-*/
+const DEFAULT_EXTRACT_PROXY = import.meta.env.DEV
+  ? "/api/extract-proxy"
+  : "https://filzy-extractor.sendfilzy-cdf.workers.dev";
 
-export const EXTRACT_API = import.meta.env.VITE_EXTRACT_API || "";
+export const EXTRACT_PROXY = (import.meta.env.VITE_EXTRACT_PROXY || DEFAULT_EXTRACT_PROXY).replace(/\/$/, "");
 
-const PLATFORMS = [
-  { id: "youtube", label: "YouTube", color: "#FF0000", match: /(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i, idIndex: 1 },
-  { id: "tiktok", label: "TikTok", color: "#000000", match: /tiktok\.com\/(@[\w.]+\/video\/(\d+)|t\/\w+)/i },
-  { id: "instagram", label: "Instagram", color: "#E1306C", match: /instagram\.com\/(?:p|reel|reels|tv)\/([\w-]+)/i },
-  { id: "x", label: "X / Twitter", color: "#000000", match: /(?:twitter|x)\.com\/\w+\/status\/(\d+)/i },
-  { id: "facebook", label: "Facebook", color: "#1877F2", match: /(?:facebook\.com|fb\.watch)\/[\w./?=&-]+/i },
-  { id: "soundcloud", label: "SoundCloud", color: "#FF5500", match: /soundcloud\.com\/[\w-]+\/[\w-]+/i },
-  { id: "vimeo", label: "Vimeo", color: "#1AB7EA", match: /vimeo\.com\/(\d+)/i },
-  { id: "twitch", label: "Twitch", color: "#9146FF", match: /twitch\.tv\/(?:videos\/\d+|\w+\/clip\/[\w-]+)/i },
-  { id: "reddit", label: "Reddit", color: "#FF4500", match: /reddit\.com\/r\/\w+\/comments\/\w+/i },
-  { id: "dailymotion", label: "Dailymotion", color: "#0066DC", match: /dailymotion\.com\/video\/(\w+)/i },
+export const TARGETS = [
+  { value: "mp4", label: "MP4", kind: "video" },
+  { value: "mp3", label: "MP3", kind: "audio" },
+  { value: "m4a", label: "M4A", kind: "audio" },
+  { value: "webm", label: "WEBM", kind: "video" },
 ];
 
-// Detect a URL's platform. Returns { id, label, color, videoId?, thumbnail?, url } or null.
-export function detectPlatform(raw) {
-  const url = (raw || "").trim();
-  if (!/^https?:\/\//i.test(url)) return null;
-  for (const p of PLATFORMS) {
-    const m = url.match(p.match);
-    if (m) {
-      const videoId = p.idIndex ? m[p.idIndex] : m[1];
-      const thumbnail = p.id === "youtube" && videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : null;
-      return { id: p.id, label: p.label, color: p.color, videoId, thumbnail, url };
-    }
-  }
-  return { id: "link", label: "Link", color: "#6F747B", url };
+const CODEC_LABELS = [
+  [/^avc1|h264/i, "H.264"],
+  [/^hev1|^hvc1|hevc/i, "HEVC"],
+  [/^av01|av1/i, "AV1"],
+  [/^vp09|vp9/i, "VP9"],
+  [/^vp8/i, "VP8"],
+  [/^mp4a|aac/i, "AAC"],
+  [/opus/i, "Opus"],
+  [/vorbis/i, "Vorbis"],
+];
+
+function hostMatches(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
-export const FORMAT_OPTS = [
-  { value: "mp4", label: "MP4 · Video" },
-  { value: "mp3", label: "MP3 · Audio" },
-];
+function youtubeVideoId(url) {
+  if (hostMatches(url.hostname, "youtu.be")) return url.pathname.split("/").filter(Boolean)[0] || null;
+  if (!hostMatches(url.hostname, "youtube.com")) return null;
+  const queryId = url.searchParams.get("v");
+  if (queryId) return queryId;
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (["shorts", "live", "embed"].includes(parts[0])) return parts[1] || null;
+  return null;
+}
 
-export const QUALITY_OPTS = {
-  mp4: [
-    { value: "best", label: "Best" },
-    { value: "1080", label: "1080p" },
-    { value: "720", label: "720p" },
-    { value: "480", label: "480p" },
-  ],
-  mp3: [
-    { value: "320", label: "320 kbps" },
-    { value: "256", label: "256 kbps" },
-    { value: "128", label: "128 kbps" },
-  ],
-};
-
-// Ask the Worker to extract. Resolves to { ok, url?, filename?, reason?, message? }.
-export async function requestExtraction({ url, format, quality }) {
-  if (!EXTRACT_API) {
-    return { ok: false, reason: "backend", message: "Extractor backend not connected yet." };
+function knownSocialProvider(hostname) {
+  for (const [domain, label] of SOCIAL_HOSTS) {
+    if (hostMatches(hostname, domain)) return label;
   }
+  return null;
+}
+
+export function inspectMediaLink(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return { state: "empty", source: null, message: "" };
+
+  let url;
   try {
-    const res = await fetch(`${EXTRACT_API}/extract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, format, quality }),
-    });
-    if (!res.ok) return { ok: false, reason: "server", message: `Server error (${res.status})` };
-    const data = await res.json();
-    if (!data?.url) return { ok: false, reason: "server", message: data?.message || "No media found" };
-    return { ok: true, url: data.url, filename: data.filename };
-  } catch (err) {
-    return { ok: false, reason: "network", message: err?.message || "Request failed" };
+    url = new URL(value);
+  } catch {
+    return { state: "invalid", source: null, message: "Paste the complete link, including https://" };
   }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return { state: "invalid", source: null, message: "Use a public https:// link." };
+  }
+
+  if (hostMatches(url.hostname, "youtube.com") || hostMatches(url.hostname, "youtu.be")) {
+    const videoId = youtubeVideoId(url);
+    if (!videoId || !/^[\w-]{11}$/.test(videoId)) {
+      return { state: "unsupported", source: null, message: "Paste a YouTube video, Short, or live replay link." };
+    }
+    return {
+      state: "supported",
+      message: "YouTube detected",
+      source: {
+        id: "youtube",
+        label: "YouTube",
+        color: "#FF0033",
+        videoId,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      },
+    };
+  }
+
+  const provider = knownSocialProvider(url.hostname);
+  if (provider) {
+    return { state: "unsupported", source: null, message: `${provider} extraction is not connected yet. Use a YouTube link for now.` };
+  }
+
+  return { state: "unsupported", source: null, message: "This source is not supported yet. Use a YouTube video link." };
+}
+
+// Kept as a small compatibility alias for callers and tests from the first
+// extractor prototype. Unknown links intentionally return null now.
+export function detectPlatform(raw) {
+  return inspectMediaLink(raw).source;
+}
+
+export function codecLabel(codec = "") {
+  return CODEC_LABELS.find(([pattern]) => pattern.test(codec))?.[1] || codec.split(".")[0]?.toUpperCase() || "Unknown";
+}
+
+export function parseMimeType(mimeType = "") {
+  const [mime = "application/octet-stream", ...parameters] = mimeType.split(";");
+  const [type = "application", subtype = "octet-stream"] = mime.trim().split("/");
+  const codecMatch = parameters.join(";").match(/codecs=["']([^"']+)["']/i);
+  const codecs = codecMatch ? codecMatch[1].split(",").map((codec) => codec.trim()).filter(Boolean) : [];
+  return { type, container: subtype === "x-m4a" ? "mp4" : subtype, codecs };
+}
+
+export function normalizeYouTubeFormat(format) {
+  const parsed = parseMimeType(format?.mime_type);
+  const durationSeconds = Number(format?.approx_duration_ms || 0) / 1000;
+  const bitrate = Number(format?.average_bitrate || format?.bitrate || 0);
+  const contentLength = Number(format?.content_length || 0) || (durationSeconds && bitrate ? Math.round((durationSeconds * bitrate) / 8) : 0);
+  const videoCodec = parsed.codecs.find((codec) => !/mp4a|aac|opus|vorbis/i.test(codec)) || "";
+  const audioCodec = parsed.codecs.find((codec) => /mp4a|aac|opus|vorbis/i.test(codec)) || (format?.has_audio && !format?.has_video ? parsed.codecs[0] || "" : "");
+
+  return {
+    id: String(format?.itag),
+    itag: Number(format?.itag),
+    container: parsed.container,
+    mimeType: format?.mime_type || "application/octet-stream",
+    codecs: parsed.codecs,
+    videoCodec,
+    audioCodec,
+    videoCodecLabel: videoCodec ? codecLabel(videoCodec) : "",
+    audioCodecLabel: audioCodec ? codecLabel(audioCodec) : "",
+    hasVideo: Boolean(format?.has_video),
+    hasAudio: Boolean(format?.has_audio),
+    width: Number(format?.width || 0),
+    height: Number(format?.height || 0),
+    fps: Number(format?.fps || 0),
+    bitrate,
+    audioBitrate: format?.has_audio ? bitrate : 0,
+    audioChannels: Number(format?.audio_channels || 0),
+    audioSampleRate: Number(format?.audio_sample_rate || 0),
+    language: format?.language || format?.audio_track?.display_name || "Original",
+    isOriginal: format?.is_original !== false,
+    isDrc: Boolean(format?.is_drc),
+    bytes: contentLength,
+    durationSeconds,
+    raw: format,
+  };
+}
+
+export function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!value) return "Size unavailable";
+  const units = ["B", "KB", "MB", "GB"];
+  const power = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const amount = value / 1024 ** power;
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: power > 1 ? 1 : 0 }).format(amount)} ${units[power]}`;
+}
+
+export function formatDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds || 0)));
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const remaining = value % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
+    : `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function formatScore(format) {
+  return (format.height || 0) * 1e12 + (format.fps || 0) * 1e9 + (format.bitrate || 0);
+}
+
+function audioScore(format) {
+  return (format.isOriginal ? 1e12 : 0) + (format.isDrc ? 0 : 1e11) + (format.bitrate || 0);
+}
+
+export function sortVideoFormats(formats) {
+  return [...formats].sort((a, b) => formatScore(b) - formatScore(a));
+}
+
+export function sortAudioFormats(formats) {
+  return [...formats].sort((a, b) => audioScore(b) - audioScore(a));
+}
+
+export function availableTargets(media) {
+  const formats = media?.formats || [];
+  const hasMp4Video = formats.some((format) => format.hasVideo && format.container === "mp4");
+  const hasWebmVideo = formats.some((format) => format.hasVideo && format.container === "webm");
+  const audio = formats.filter((format) => format.hasAudio && !format.hasVideo);
+  return TARGETS.filter((target) => {
+    if (target.value === "mp4") return hasMp4Video;
+    if (target.value === "webm") return hasWebmVideo;
+    if (target.value === "m4a") return audio.some((format) => format.container === "mp4" || format.audioCodecLabel === "AAC");
+    return target.value === "mp3" && audio.length > 0;
+  });
+}
+
+function videoChoiceLabel(format) {
+  const resolution = format.height ? `${format.height}p` : "Video";
+  const fps = format.fps ? ` · ${format.fps} FPS` : "";
+  return `${resolution}${fps} · ${format.videoCodecLabel || format.container.toUpperCase()}`;
+}
+
+function audioChoiceLabel(format) {
+  const kbps = format.bitrate ? `${Math.round(format.bitrate / 1000)} kbps` : "Original bitrate";
+  return `${format.audioCodecLabel || format.container.toUpperCase()} · ${kbps}`;
+}
+
+export function qualityChoices(media, target) {
+  const formats = media?.formats || [];
+  if (["mp4", "webm"].includes(target)) {
+    const seen = new Set();
+    return sortVideoFormats(formats.filter((format) => format.hasVideo && format.container === target))
+      .filter((format) => {
+        const key = [format.height, format.fps, format.videoCodecLabel, format.hasAudio].join(":");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((format, index) => ({
+        value: format.id,
+        label: `${index === 0 ? "Best · " : ""}${videoChoiceLabel(format)}`,
+        description: `${format.hasAudio ? "Audio included" : "Original video stream"} · ${formatBytes(format.bytes)}`,
+      }));
+  }
+
+  const compatible = formats.filter((format) => {
+    if (!format.hasAudio || format.hasVideo) return false;
+    return target !== "m4a" || format.container === "mp4" || format.audioCodecLabel === "AAC";
+  });
+  const seen = new Set();
+  return sortAudioFormats(compatible)
+    .filter((format) => {
+      const key = [format.audioCodecLabel, Math.round(format.bitrate / 1000), format.language, format.isDrc].join(":");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((format, index) => ({
+      value: format.id,
+      label: `${index === 0 ? "Best · " : ""}${audioChoiceLabel(format)}`,
+      description: `${format.language}${format.isDrc ? " · volume balanced" : " · original track"} · ${formatBytes(format.bytes)}`,
+    }));
+}
+
+export function audioChoices(media, target = "mp4") {
+  const compatible = (media?.formats || []).filter((format) => {
+    if (!format.hasAudio || format.hasVideo) return false;
+    if (target === "mp4") return format.container === "mp4" || format.audioCodecLabel === "AAC";
+    if (target === "webm") return format.container === "webm" || format.audioCodecLabel === "Opus";
+    return true;
+  });
+  return sortAudioFormats(compatible).map((format, index) => ({
+    value: format.id,
+    label: `${index === 0 ? "Best · " : ""}${audioChoiceLabel(format)}`,
+    description: `${format.language} · ${format.audioChannels ? `${format.audioChannels} channels` : "source channels"}`,
+  }));
+}
+
+export function defaultExtractSettings(media, requestedTarget = "mp4") {
+  const targets = availableTargets(media);
+  const target = targets.some((option) => option.value === requestedTarget) ? requestedTarget : targets[0]?.value || "mp4";
+  const qualities = qualityChoices(media, target);
+  const audio = audioChoices(media, target);
+  return {
+    target,
+    formatId: qualities[0]?.value || "",
+    audioId: audio[0]?.value || "",
+    includeAudio: true,
+    bitrate: "320",
+    channels: "original",
+  };
+}
+
+export function patchTargetSettings(media, settings, target) {
+  return { ...settings, ...defaultExtractSettings(media, target), target };
+}
+
+export function sourceSummary(media) {
+  const video = sortVideoFormats((media?.formats || []).filter((format) => format.hasVideo))[0];
+  const audio = sortAudioFormats((media?.formats || []).filter((format) => format.hasAudio && !format.hasVideo))[0];
+  return {
+    video: video ? `${video.height || "?"}p${video.fps ? ` · ${video.fps} FPS` : ""} · ${video.videoCodecLabel}` : "No video stream",
+    audio: audio ? `${audio.audioCodecLabel} · ${audio.bitrate ? `~${Math.round(audio.bitrate / 1000)} kbps` : "source bitrate"}` : "No audio stream",
+  };
+}
+
+export function outputSummary(media, settings) {
+  const choice = qualityChoices(media, settings.target).find((option) => option.value === settings.formatId);
+  if (settings.target === "mp3") return `MP3 · ${settings.bitrate} kbps`;
+  if (settings.target === "m4a") return choice?.label.replace(/^Best · /, "") || "M4A";
+  return choice?.label.replace(/^Best · /, "") || settings.target.toUpperCase();
+}
+
+export function findFormat(media, id) {
+  return (media?.formats || []).find((format) => format.id === String(id));
+}
+
+export async function resolveMedia(source, options = {}) {
+  if (!source || source.id !== "youtube") throw new Error("This source is not supported yet.");
+  const { resolveYouTube } = await import("@/lib/youtubeResolver");
+  return resolveYouTube(source, options);
 }

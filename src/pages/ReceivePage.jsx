@@ -1,21 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Shell } from "@/components/Shell";
 import { Receive, DownloadStarted, ReceiveStatusCard } from "@/components/Streaming";
 import { BeamReceiver } from "@/lib/beam";
 import { selfId as genSelfId } from "@/lib/ids";
 import { kindOf } from "@/lib/files";
 import { zipSync, downloadBlob } from "@/lib/zip";
 import { preventSleep, allowSleep } from "@/lib/wakelock";
+import { useSeo } from "@/lib/seo";
 
 /*
-  The recipient. Opens filzy.site/#/s/<beamId>, connects to the sender over
+  The recipient. Opens filzy.site/s/<beamId>, connects to the sender over
   WebRTC, shows the advertised files, and downloads them for real (single file
   or a zip of all). Extractions are queued one at a time because the data
   channel streams files sequentially.
 */
 export default function ReceivePage() {
   const { id } = useParams();
+  useSeo({
+    title: "Receive a Filzy Beam",
+    description: "Receive files from a live Filzy Beam.",
+    path: id ? `/s/${id}` : "/s",
+    robots: "noindex, nofollow",
+  });
   const [phase, setPhase] = useState("connecting"); // connecting | ready | done | error
   const [files, setFiles] = useState([]);
   const [note, setNote] = useState("");
@@ -171,25 +177,23 @@ export default function ReceivePage() {
   };
 
   return (
-    <Shell>
-      <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
-        {phase === "done" ? (
-          <DownloadStarted />
-        ) : phase === "ready" ? (
-          <Receive
-            note={note}
-            files={files}
-            status={status}
-            progress={progress}
-            speed={speed}
-            allBusy={allBusy}
-            onDownloadOne={downloadOne}
-            onDownloadAll={downloadAll}
-          />
-        ) : (
-          <ReceiveStatusCard variant={phase} onRetry={() => window.location.reload()} />
-        )}
-      </div>
-    </Shell>
+    <div className="flex flex-1 items-center justify-center px-[10px] pt-[60px] pb-[44px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
+      {phase === "done" ? (
+        <DownloadStarted />
+      ) : phase === "ready" ? (
+        <Receive
+          note={note}
+          files={files}
+          status={status}
+          progress={progress}
+          speed={speed}
+          allBusy={allBusy}
+          onDownloadOne={downloadOne}
+          onDownloadAll={downloadAll}
+        />
+      ) : (
+        <ReceiveStatusCard variant={phase} onRetry={() => window.location.reload()} />
+      )}
+    </div>
   );
 }

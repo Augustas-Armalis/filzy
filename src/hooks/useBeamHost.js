@@ -72,7 +72,7 @@ export function useBeamHost() {
     if (overdriveRef.current) host.setOverdrive(true);
     hostRef.current = host;
 
-    setShareUrl(`${window.location.origin}${window.location.pathname}#/s/${bId}`);
+    setShareUrl(`${window.location.origin}/s/${bId}`);
     setLive(true);
     void preventSleep();
   }, []);

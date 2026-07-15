@@ -1,79 +1,105 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { takePhoto, refillPhotos, withParams, triggerDownload } from "@/lib/unsplash";
 
-/*
-  Full-bleed background photo, loaded progressively (blur → mid → full premium).
-  Sits behind everything; stretches to cover the page (object-cover) even when
-  the content makes the page taller than the viewport — no empty space.
-  Random Unsplash photo per load, portrait on mobile / landscape on desktop.
-*/
-export function UnsplashBackground({ onPhoto }) {
-  const [stages] = useState(() => {
-    const orientation =
-      window.innerHeight >= window.innerWidth ? "portrait" : "landscape";
-    const photo = takePhoto(orientation);
+let sceneId = 0;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const cap = (n) => Math.min(Math.round(n * dpr), 2560);
-    const w = cap(window.innerWidth);
-    const h = cap(window.innerHeight);
-    const at = (div, q) =>
-      withParams(
-        photo.raw,
-        `fit=crop&crop=entropy&auto=format&w=${Math.max(
-          16,
-          Math.round(w / div)
-        )}&h=${Math.max(16, Math.round(h / div))}&q=${q}`
-      );
+function makeScene() {
+  const orientation = window.innerHeight >= window.innerWidth ? "portrait" : "landscape";
+  const photo = takePhoto(orientation);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cap = (value) => Math.min(Math.round(value * dpr), 2560);
+  const width = cap(window.innerWidth);
+  const height = cap(window.innerHeight);
+  const at = (divisor, quality) => withParams(
+    photo.raw,
+    `fit=crop&crop=entropy&auto=format&w=${Math.max(16, Math.round(width / divisor))}&h=${Math.max(16, Math.round(height / divisor))}&q=${quality}`,
+  );
 
-    return {
-      orientation,
-      photo,
-      urls: [
-        at(26, 25), // super-low blurred placeholder (~1KB)
-        at(3, 55), // mid quality
-        withParams(
-          photo.raw,
-          `fit=crop&crop=entropy&auto=format&w=${w}&h=${h}&q=85`
-        ), // full, premium
-      ],
-    };
-  });
+  return {
+    id: ++sceneId,
+    orientation,
+    photo,
+    urls: [
+      at(26, 25),
+      at(3, 55),
+      withParams(photo.raw, `fit=crop&crop=entropy&auto=format&w=${width}&h=${height}&q=85`),
+    ],
+  };
+}
 
-  const [done, setDone] = useState([false, false, false]);
-
-  useEffect(() => {
-    refillPhotos(stages.orientation); // top up the endless pool for next loads
-    onPhoto?.(stages.photo); // hand the photo up so it can be attributed
-  }, [stages.orientation, stages.photo, onPhoto]);
+function PhotoScene({ scene, active, visible, onReady }) {
+  const [loaded, setLoaded] = useState([false, false, false]);
 
   return (
-    <div className="absolute inset-0 overflow-hidden">
-      {stages.urls.map((src, i) => (
+    <div
+      className={`pointer-events-none absolute inset-0 transition-opacity duration-[900ms] ease-in-out ${visible ? "opacity-100" : "opacity-0"}`}
+    >
+      {scene.urls.map((src, index) => (
         <img
-          key={i}
+          key={src}
           src={src}
           alt=""
           aria-hidden="true"
-          fetchPriority={i === 0 || i === stages.urls.length - 1 ? "high" : "low"}
+          fetchPriority={active && (index === 0 || index === scene.urls.length - 1) ? "high" : "low"}
           decoding="async"
           onLoad={() => {
-            // The full-res stage finished → the photo is genuinely "used".
-            if (i === stages.urls.length - 1)
-              triggerDownload(stages.photo.downloadLocation);
-            setDone((d) => {
-              const c = [...d];
-              c[i] = true;
-              return c;
-            });
+            if (active && index >= 1) onReady(scene);
+            if (active && index === scene.urls.length - 1) triggerDownload(scene.photo.downloadLocation);
+            setLoaded((current) => current.map((value, itemIndex) => itemIndex === index ? true : value));
           }}
           className={
-            "pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
-            (i === 0 ? "scale-110 blur-2xl " : "") +
-            (done[i] ? "opacity-100" : "opacity-0")
+            `absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${index === 0 ? "scale-110 blur-2xl " : ""}${loaded[index] ? "opacity-100" : "opacity-0"}`
           }
         />
       ))}
+    </div>
+  );
+}
+
+/*
+  Persistent full-bleed photo layer. Route changes prepare a new progressive
+  image underneath the UI, then crossfade only after its medium stage is ready.
+  The previous scene stays visible throughout, so navigation never flashes.
+*/
+export function UnsplashBackground({ onPhoto, sceneKey }) {
+  const [current, setCurrent] = useState(makeScene);
+  const [previous, setPrevious] = useState(null);
+  const [ready, setReady] = useState(false);
+  const lastKey = useRef(sceneKey);
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
+  useEffect(() => {
+    refillPhotos(current.orientation);
+    onPhoto?.(current.photo);
+  }, []); // first scene only; later attribution changes when the crossfade starts
+
+  useEffect(() => {
+    if (lastKey.current === sceneKey) return;
+    lastKey.current = sceneKey;
+    const next = makeScene();
+    setPrevious(currentRef.current);
+    setCurrent(next);
+    setReady(false);
+    void refillPhotos(next.orientation);
+  }, [sceneKey]);
+
+  useEffect(() => {
+    if (!ready || !previous) return undefined;
+    const timeout = window.setTimeout(() => setPrevious(null), 950);
+    return () => window.clearTimeout(timeout);
+  }, [previous, ready]);
+
+  const markReady = (scene) => {
+    if (scene.id !== currentRef.current.id) return;
+    setReady(true);
+    onPhoto?.(scene.photo);
+  };
+
+  return (
+    <div className="fixed inset-0 overflow-hidden bg-text">
+      {previous && <PhotoScene key={previous.id} scene={previous} active={false} visible={!ready} onReady={() => {}} />}
+      <PhotoScene key={current.id} scene={current} active visible={!previous || ready} onReady={markReady} />
     </div>
   );
 }

@@ -1,0 +1,32 @@
+# Filzy
+
+Filzy is a browser-first collection of file tools at https://filzy.site/.
+
+## Core tools
+
+- Beam: https://filzy.site/ — live file and folder transfer between connected devices. Filzy does not store a cloud copy of Beam files. The sender must remain online while the receiver downloads.
+- Convert: https://filzy.site/convert — browser-side conversion for supported image, video, audio, data, and subtitle formats, with batch conversion and format-specific controls.
+- Compress: https://filzy.site/compress — browser-side video, image, and audio compression by target size or percentage.
+- Extract: https://filzy.site/extract — source-aware extraction for authorized YouTube media. It shows only qualities returned for the selected source. Some media requests may use Filzy's narrow streaming proxy; muxing and audio conversion run in the browser.
+
+## Important focused pages
+
+- PNG to SVG: https://filzy.site/convert/png-to-svg
+- MOV to MP4: https://filzy.site/convert/mov-to-mp4
+- WAV to MP3: https://filzy.site/convert/wav-to-mp3
+- Compress video to 25 MB: https://filzy.site/compress/video-to-25mb
+- Compress image to 1 MB: https://filzy.site/compress/image-to-1mb
+- YouTube to MP3: https://filzy.site/extract/youtube-to-mp3
+- YouTube to MP4: https://filzy.site/extract/youtube-to-mp4
+- Send large files: https://filzy.site/send/large-files
+
+## Guides
+
+The Filzy guides hub is https://filzy.site/blog. It contains practical, human-readable explanations of vector tracing, image formats, video and audio compression, direct transfer privacy, and real media source quality.
+
+## Accuracy and rights
+
+- Filzy does not claim that upscaling creates genuine source detail.
+- Target-size compression is an estimate; very aggressive targets require quality compromises.
+- Media extraction is intended only for content the user owns or has permission to download.
+- Pages for unsupported extraction providers are not published.

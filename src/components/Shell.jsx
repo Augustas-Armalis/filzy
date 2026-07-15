@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { UnsplashBackground } from "@/components/UnsplashBackground";
 import { Navbar } from "@/components/Navbar";
 import { PoweredBy } from "@/components/PoweredBy";
@@ -16,10 +17,18 @@ import { Attribution } from "@/components/Attribution";
 */
 export function Shell({ children }) {
   const [photo, setPhoto] = useState(null);
+  const location = useLocation();
+  const [backgroundKey, setBackgroundKey] = useState(location.pathname);
+
+  useEffect(() => {
+    if (backgroundKey === location.pathname) return undefined;
+    const timeout = window.setTimeout(() => setBackgroundKey(location.pathname), 250);
+    return () => window.clearTimeout(timeout);
+  }, [backgroundKey, location.pathname]);
 
   return (
     <div className="relative flex min-h-[100svh] w-full flex-col bg-[#050505]">
-      <UnsplashBackground onPhoto={setPhoto} />
+      <UnsplashBackground onPhoto={setPhoto} sceneKey={backgroundKey} />
       <Navbar />
       <PoweredBy />
       <Attribution photo={photo} />

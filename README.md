@@ -1,78 +1,56 @@
 # Filzy
 
-A minimal **React + Vite + Tailwind CSS v4 + Framer Motion** starter that auto-deploys to **GitHub Pages**.
+Filzy is a browser-first file toolkit built with React, Vite, Tailwind CSS, and Framer Motion.
 
-Two pages with navigation, one example component, a color-token theme, and a couple of demos — that's it. Build from here.
+- Beam sends files and folders between connected devices without storing a Filzy cloud copy.
+- Convert handles supported image, video, audio, data, and subtitle conversions with batch controls.
+- Compress targets an output size or percentage for video, images, and audio.
+- Extract resolves genuine source formats for authorized YouTube media and performs compatible muxing or conversion.
 
-## Quick start
+## Local development
 
 ```bash
-npm install      # install dependencies
-npm run dev      # dev server → http://localhost:5173
-npm run build    # production build → ./dist
-npm run preview  # preview the build locally
+npm install
+npm run dev
+npm test
+npm run build
+npm run preview
 ```
 
-## Structure
+The production build is written to `dist` and deployed to GitHub Pages by [the deployment workflow](.github/workflows/deploy.yml).
 
-```
-index.html                 # entry + Inter font
-vite.config.js             # Vite + React + Tailwind, @/ alias
-public/.nojekyll           # don't run Jekyll on Pages
-.github/workflows/deploy.yml  # auto-deploy to GitHub Pages on push to main
+## Routing and SEO
+
+Filzy uses `BrowserRouter` and clean paths. The Vite build creates a real HTML entry point for every indexable landing page and guide, plus route-specific metadata, structured data, visible prerendered copy, a sitemap, an RSS feed, and a noindex 404 page.
+
+Examples:
+
+- `/convert/png-to-svg`
+- `/compress/video-to-25mb`
+- `/extract/youtube-to-mp3`
+- `/send/large-files`
+- `/blog/png-to-svg-quality-guide`
+
+The route catalog and guide content live in [src/content/seoCatalog.js](src/content/seoCatalog.js). The implementation and post-deployment indexing checklist are documented in [docs/SEO_GROWTH_SYSTEM.md](docs/SEO_GROWTH_SYSTEM.md).
+
+After a production deployment, `npm run seo:indexnow` submits the catalog URLs to IndexNow. Run it only after the generated pages and public IndexNow key are live.
+
+## Main structure
+
+```text
 src/
-  main.jsx                 # React entry
-  index.css                # 🎨 color tokens (CSS variables) + Tailwind setup
-  App.jsx                  # routes (HashRouter)
-  components/
-    Layout.jsx             # header nav + page outlet
-    Button.jsx             # the example component
-  pages/
-    Home.jsx               # color showcase + custom Tailwind + Framer Motion
-    About.jsx              # second page (navigation demo)
+  App.jsx                  clean routes and page transitions
+  components/              shared UI, navigation, tools, and SEO content
+  content/seoCatalog.js    indexable routes and editorial guides
+  hooks/                   Beam host state
+  lib/                     conversion, compression, Beam, extraction, and SEO logic
+  pages/                   Send, Convert, Compress, Extract, Receive, and Guides
+workers/
+  signaling/               Beam coordination worker
+  extractor/               narrow media streaming proxy
+vite.config.js             app build, local proxy, and static SEO page generation
 ```
 
-## Theming
+## Environment
 
-All colors are CSS variables in [src/index.css](src/index.css), wired into Tailwind via `@theme inline`. Change one value and the whole app updates:
-
-```css
-:root {
-  --primary: #7c3aed;
-  --accent: #06b6d4;
-  --foreground: #18181b;
-  /* … */
-}
-```
-
-Use them as utilities anywhere: `bg-primary`, `text-foreground`, `border-border`. (No dark mode — light only.)
-
-## Routing
-
-Uses `HashRouter`, so client-side routing **just works on GitHub Pages** with no server config (URLs look like `filzy.site/#/about`). Add pages in [src/App.jsx](src/App.jsx).
-
-> Want clean URLs (`filzy.site/about`)? Swap `HashRouter` for `BrowserRouter` and add the standard GitHub Pages `404.html` SPA redirect.
-
-## Deploy to GitHub Pages
-
-Fully automatic. On every push to `main`, the [workflow](.github/workflows/deploy.yml)
-builds the site, turns on GitHub Pages (source = "GitHub Actions") if it isn't
-already, and publishes — no manual Settings change needed.
-
-Live URL: **https://augustas-armalis.github.io/filzy/**
-
-(The build uses a relative base + `HashRouter`, so it works at that project URL
-and at a root custom domain without any extra config.)
-
-### Optional: custom domain (filzy.site)
-
-`filzy.site` currently has **no DNS configured**, so it points nowhere. To use it:
-
-1. At your domain host, add apex `A` records for `filzy.site` →
-   `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
-   (optionally a `CNAME` record `www` → `augustas-armalis.github.io`).
-2. Add a file `public/CNAME` containing `filzy.site` and push.
-3. Repo **Settings → Pages → Custom domain** → enter `filzy.site`, then enable
-   **Enforce HTTPS** once it verifies.
-
-Until DNS is set up, use the github.io URL above.
+Copy `.env.example` and configure only the services required for the feature you are running. Never commit Cloudflare API tokens, R2 secrets, or other account credentials.

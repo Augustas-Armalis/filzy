@@ -1,25 +1,25 @@
 {
   "name": "Filzy",
   "short_name": "Filzy",
-  "description": "Send unlimited size files across devices & the world",
-  "start_url": ".",
-  "scope": ".",
+  "description": "Send, convert, compress, and extract files with Filzy.",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#050505",
   "theme_color": "#050505",
   "icons": [
     {
-      "src": "branding/android-chrome-192x192.png",
+      "src": "/branding/android-chrome-192x192%201.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "branding/android-chrome-512x512.png",
+      "src": "/branding/android-chrome-512x512%201.png",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "branding/android-chrome-512x512.png",
+      "src": "/branding/android-chrome-512x512%201.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

@@ -63,7 +63,7 @@ export function TabBar({ tabs, activeId, onChange }) {
             type="button"
             onClick={() => onChange(id)}
             className={cn(
-              "flex h-[32px] w-full cursor-pointer items-center justify-center gap-[4px] rounded-[9px] border transition-all duration-150",
+              "flex h-[32px] w-full cursor-pointer touch-manipulation items-center justify-center gap-[4px] rounded-[9px] border transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
               isActive
                 ? "border-text bg-text hover:border-text-hover hover:bg-text-hover"
                 : "border-border bg-white hover:bg-white-hover",
@@ -91,14 +91,17 @@ export function TabBar({ tabs, activeId, onChange }) {
 // CtaButton — the primary black button with the Casser display label that
 // blur-swaps when the label changes. Disabled = dimmed + non-interactive.
 // ---------------------------------------------------------------------------
-export function CtaButton({ label, onClick, disabled, busy, className }) {
+export function CtaButton({ label, onClick, disabled, busy, busyLabel = "Working…", onCancel, className }) {
+  const blocked = disabled || (busy && !onCancel);
   return (
     <button
       type="button"
-      onClick={disabled || busy ? undefined : onClick}
+      disabled={blocked}
+      aria-busy={busy || undefined}
+      onClick={disabled ? undefined : busy && onCancel ? onCancel : onClick}
       className={cn(
-        "relative flex h-[38px] w-full items-center justify-center rounded-[11px] bg-text transition-all duration-150",
-        disabled ? "pointer-events-none opacity-50" : busy ? "pointer-events-none opacity-90" : "cursor-pointer hover:bg-text-hover",
+        "relative flex h-[38px] w-full touch-manipulation items-center justify-center rounded-[11px] bg-text transition-[background-color,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/25 focus-visible:ring-offset-2",
+        disabled ? "cursor-not-allowed opacity-50" : busy && !onCancel ? "cursor-wait opacity-90" : "cursor-pointer hover:bg-text-hover",
         className,
       )}
     >
@@ -109,7 +112,7 @@ export function CtaButton({ label, onClick, disabled, busy, className }) {
           className="absolute inset-0 flex items-center justify-center gap-[7px] font-normal font-casser text-[16px] text-white"
         >
           {busy && <Loader size={15} strokeWidth={1.6} absoluteStrokeWidth className="animate-spin text-white" />}
-          {busy ? "Working…" : label}
+          {busy ? busyLabel : label}
         </motion.span>
       </AnimatePresence>
     </button>
@@ -125,11 +128,11 @@ export function GhostButton({ children, onClick, Icon, className, type = "button
       type={type}
       onClick={onClick}
       className={cn(
-        "flex h-[30px] cursor-pointer items-center justify-center gap-[5px] rounded-[9px] border border-border bg-white pl-[8px] pr-[10px] transition-all duration-150 hover:bg-white-hover",
+        "flex h-[30px] cursor-pointer touch-manipulation items-center justify-center gap-[5px] rounded-[9px] border border-border bg-white pl-[8px] pr-[10px] transition-[background-color,border-color,color] duration-150 hover:bg-white-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
         className,
       )}
     >
-      {Icon && <Icon size={16} strokeWidth={1.17} absoluteStrokeWidth className="text-text" />}
+      {Icon && <Icon size={16} strokeWidth={1.17} absoluteStrokeWidth className="text-text" aria-hidden="true" />}
       <span className="text-[14px] text-text">{children}</span>
     </button>
   );
@@ -161,7 +164,8 @@ export function StackIcon({ Icon, spin = false }) {
 export function Dropzone({ isDragging, onOpen, Icon, title, subtitle, dragTitle = "Drop to add", height = "h-[142px]" }) {
   const [over, setOver] = useState(false);
   return (
-    <div
+    <button
+      type="button"
       onClick={onOpen}
       onDragEnter={() => setOver(true)}
       onDragOver={(e) => e.preventDefault()}
@@ -170,7 +174,7 @@ export function Dropzone({ isDragging, onOpen, Icon, title, subtitle, dragTitle 
       }}
       onDrop={() => setOver(false)}
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-[10px] rounded-[12px] border border-dashed border-border bg-bg transition-all duration-150",
+        "flex w-full cursor-pointer touch-manipulation flex-col items-center justify-center gap-[10px] rounded-[12px] border border-dashed border-border bg-bg transition-[background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
         height,
         isDragging ? "border-text bg-bg-hover" : "hover:bg-bg-hover",
         over && "border-solid bg-bg-hover",
@@ -181,7 +185,7 @@ export function Dropzone({ isDragging, onOpen, Icon, title, subtitle, dragTitle 
         <p className="text-[14px] text-alt-text">{isDragging ? dragTitle : title}</p>
         {subtitle && <p className="text-[11px] text-dalt-text">{subtitle}</p>}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -200,7 +204,7 @@ export function Segmented({ options, value, onChange, className }) {
             type="button"
             onClick={() => onChange(o.id)}
             className={cn(
-              "flex h-[28px] w-full cursor-pointer items-center justify-center rounded-[7px] text-[13px] transition-all duration-150",
+              "flex h-[28px] w-full cursor-pointer touch-manipulation items-center justify-center rounded-[7px] text-[13px] transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
               isActive ? "bg-white text-text shadow-sm" : "text-alt-text hover:text-text",
             )}
           >
@@ -232,7 +236,7 @@ export function ProgressBar({ value, className }) {
 // FormatMenu — a compact searchable dropdown for choosing an output format.
 // options: [{ value, label }]. Renders a trigger + popup list.
 // ---------------------------------------------------------------------------
-export function FormatMenu({ value, options, onChange, placeholder = "Format", disabled }) {
+export function FormatMenu({ value, options, onChange, placeholder = "Format", disabled, ariaLabel }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [rect, setRect] = useState(null); // trigger position for the portal
@@ -246,7 +250,9 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
     if (!el) return;
     const r = el.getBoundingClientRect();
     const below = window.innerHeight - r.bottom;
-    setRect({ left: r.left, top: r.bottom + 6, bottom: window.innerHeight - r.top + 6, width: r.width, openUp: below < 240 });
+    const width = Math.min(Math.max(r.width, options.some((option) => option.description) ? 280 : 168), window.innerWidth - 20);
+    const left = Math.max(10, Math.min(r.left, window.innerWidth - width - 10));
+    setRect({ left, top: r.bottom + 6, bottom: window.innerHeight - r.top + 6, width, openUp: below < 240 });
   };
 
   useLayoutEffect(() => {
@@ -259,11 +265,17 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
       if (triggerRef.current?.contains(e.target) || popupRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    const reposition = () => setOpen(false); // simplest: close on scroll/resize
+    let frame = null;
+    const reposition = (event) => {
+      if (event?.type === "scroll" && popupRef.current?.contains(event.target)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
+    };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDown);
       window.removeEventListener("scroll", reposition, true);
       window.removeEventListener("resize", reposition);
@@ -272,7 +284,7 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
 
   const selected = options.find((o) => o.value === value);
   const filtered = query
-    ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()) || o.value.toLowerCase().includes(query.toLowerCase()))
+    ? options.filter((o) => String(o.label).toLowerCase().includes(query.toLowerCase()) || String(o.value).toLowerCase().includes(query.toLowerCase()))
     : options;
 
   return (
@@ -281,13 +293,14 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
         ref={triggerRef}
         type="button"
         disabled={disabled}
+        aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-[36px] w-full items-center justify-between rounded-[10px] border border-border bg-white px-[10px] transition-all duration-150",
+          "flex h-[36px] w-full touch-manipulation items-center justify-between rounded-[10px] border border-border bg-white px-[10px] transition-[background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
           disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-white-hover",
         )}
       >
-        <span className={cn("text-[14px]", selected ? "text-text" : "text-alt-text")}>{selected ? selected.label : placeholder}</span>
+        <span className={cn("min-w-0 truncate pr-[6px] text-[14px]", selected ? "text-text" : "text-alt-text")}>{selected ? selected.label : placeholder}</span>
         <ChevronDown size={15} strokeWidth={1.5} absoluteStrokeWidth className={cn("text-alt-text transition-transform duration-150", open && "rotate-180")} />
       </button>
 
@@ -303,7 +316,7 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
               style={{
                 position: "fixed",
                 left: rect.left,
-                width: Math.max(rect.width, 168),
+                width: rect.width,
                 ...(rect.openUp ? { bottom: rect.bottom } : { top: rect.top }),
                 zIndex: 80,
               }}
@@ -313,7 +326,9 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
                 <div className="flex items-center gap-[6px] border-b border-border px-[10px] py-[8px]">
                   <Search size={14} strokeWidth={1.5} absoluteStrokeWidth className="text-alt-text" />
                   <input
-                    autoFocus
+                    autoFocus={typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches}
+                    autoComplete="off"
+                    name="format-search"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search…"
@@ -335,12 +350,15 @@ export function FormatMenu({ value, options, onChange, placeholder = "Format", d
                         setQuery("");
                       }}
                       className={cn(
-                        "flex h-[34px] w-full items-center justify-between rounded-[8px] px-[9px] text-[14px] transition-all duration-150",
+                        "flex min-h-[34px] w-full cursor-pointer touch-manipulation items-center justify-between gap-[8px] rounded-[8px] px-[9px] py-[7px] text-left text-[14px] transition-[background-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text/20",
                         isSel ? "bg-bg text-text" : "text-alt-text hover:bg-bg hover:text-text",
                       )}
                     >
-                      <span>{o.label}</span>
-                      {isSel && <Check size={15} strokeWidth={1.75} absoluteStrokeWidth className="text-text" />}
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate">{o.label}</span>
+                        {o.description && <span className="truncate text-[10px] leading-[13px] text-dalt-text">{o.description}</span>}
+                      </span>
+                      {isSel && <Check size={15} strokeWidth={1.75} absoluteStrokeWidth className="shrink-0 text-text" />}
                     </button>
                   );
                 })}
