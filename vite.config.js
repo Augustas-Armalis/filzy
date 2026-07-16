@@ -224,15 +224,20 @@ function prerenderedContent(page) {
       return related ? `<li><a href="${path}">${escapeHtml(related.heading)}</a></li>` : "";
     }).join("");
 
+  // Crawlers read this static copy from the raw HTML, but real visitors must
+  // never see it flash before React mounts and replaces #root. Rendering it in
+  // a visually-hidden (screen-reader-clip) container keeps the text in the
+  // document for indexing while making it invisible during the mount gap, so
+  // there is no split-second unstyled "Filzy Beam / Send files" block on load.
   return `
-    <main style="min-height:100vh;background:#050505;padding:64px 16px;color:#050505;font-family:system-ui,sans-serif">
-      <article style="max-width:900px;margin:0 auto;background:#fff;border-radius:18px;padding:28px">
+    <div style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">
+      <main>
         <p>${escapeHtml(page.eyebrow || "Filzy")}</p>
         <h1>${escapeHtml(page.heading)}</h1>
         <p>${escapeHtml(page.intro || page.description)}</p>${steps}${details}
         ${links ? `<nav aria-label="Related pages"><h2>Explore Filzy</h2><ul>${links}</ul></nav>` : ""}
-      </article>
-    </main>`;
+      </main>
+    </div>`;
 }
 
 function renderRouteHtml(template, page, { noindex = false } = {}) {

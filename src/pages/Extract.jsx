@@ -198,17 +198,32 @@ function ScrollFadeList({ children }) {
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return undefined;
+    // Only fade an edge when the list genuinely overflows and has scrolled.
+    // The tolerance stops row blur/layout animations (which briefly report a
+    // taller scrollHeight than the settled height) from flashing the bottom
+    // fade on lists that actually fit. Observer callbacks are coalesced into a
+    // single post-layout frame so we measure the settled size, never a mid-
+    // animation one.
+    const TOLERANCE = 12;
     const update = () => {
-      setFadeTop(element.scrollTop > 2);
-      setFadeBottom(element.scrollTop + element.clientHeight < element.scrollHeight - 2);
+      const overflow = element.scrollHeight - element.clientHeight;
+      const overflowing = overflow > TOLERANCE;
+      setFadeTop(overflowing && element.scrollTop > TOLERANCE);
+      setFadeBottom(overflowing && element.scrollTop + element.clientHeight < element.scrollHeight - TOLERANCE);
+    };
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
     };
     update();
     element.addEventListener("scroll", update, { passive: true });
-    const resize = new ResizeObserver(update);
-    const mutations = new MutationObserver(update);
+    const resize = new ResizeObserver(schedule);
+    const mutations = new MutationObserver(schedule);
     resize.observe(element);
     mutations.observe(element, { childList: true, subtree: true });
     return () => {
+      cancelAnimationFrame(frame);
       element.removeEventListener("scroll", update);
       resize.disconnect();
       mutations.disconnect();

@@ -382,10 +382,16 @@ async function resolveWithBrowser(env, videoId) {
     browser.off("targetcreated", attachMediaTarget);
     await Promise.all(childSessions.map((session) => session.detach().catch(() => {})));
     await cdp?.detach().catch(() => {});
-    if (!keepSession) {
+    if (keepSession) {
+      // Downloads reconnect to this session, so keep the browser alive.
+      await browser.disconnect().catch(() => {});
+    } else {
+      // Fully close on failure. Disconnecting would leave the browser running
+      // for its keep_alive window, leaking a Browser Rendering concurrency slot
+      // and quickly exhausting the account limit (429: Unable to create browser).
       await page.close().catch(() => {});
+      await browser.close().catch(() => {});
     }
-    await browser.disconnect().catch(() => {});
   }
 }
 
@@ -661,6 +667,10 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const videoId = requestUrl.searchParams.get("videoId") || "";
       if (!/^[\w-]{11}$/.test(videoId)) return json({ error: "Invalid YouTube video id" }, 400, origin);
+      // Piped is the fast path and returns immediately. The browser resolver is
+      // only attempted when Piped fails outright — on the free plan Browser
+      // Rendering is unavailable, so trying it on every resolve would just add
+      // latency before falling back. Keep Piped's result even at 360p.
       let directError;
       try {
         return json(await resolveWithPiped(videoId), 200, origin);
@@ -668,8 +678,8 @@ export default {
         directError = error;
         try {
           return json(await resolveWithBrowser(env, videoId), 200, origin);
-        } catch (error) {
-          const message = [directError?.message, error?.message].filter(Boolean).join(" · ");
+        } catch (browserError) {
+          const message = [directError?.message, browserError?.message].filter(Boolean).join(" · ");
           return json({ error: message || "Could not resolve this YouTube video" }, 502, origin);
         }
       }
