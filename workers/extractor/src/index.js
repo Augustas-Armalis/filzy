@@ -19,6 +19,8 @@ const TARGET_HOSTS = [
   "muscdn.com",
   "cdninstagram.com",
   "fbcdn.net",
+  "tikwm.com",
+  "eepy.today",
 ];
 const SOCIAL_SOURCE_HOSTS = ["tiktok.com", "instagram.com", "facebook.com", "fb.watch"];
 const REQUEST_HEADERS = new Set(["accept", "accept-language", "content-type", "range", "user-agent", "x-origin"]);
@@ -483,6 +485,116 @@ function allowedSocialSource(value) {
   }
 }
 
+// Free, browser-free social resolution. TikTok goes through tikwm (returns a
+// no-watermark MP4 + audio on tiktokcdn, which we can proxy). Instagram and
+// Facebook are best-effort through a public cobalt instance, which tunnels the
+// media file; they can fail if the instance is blocked upstream, in which case
+// the caller falls back to the browser resolver.
+const COBALT_INSTANCES = ["https://co.eepy.today/"];
+
+function directSocialFormats(videoUrl, audioUrl, meta = {}) {
+  return [
+    {
+      itag: 1000,
+      url: videoUrl,
+      mimeType: 'video/mp4; codecs="avc1.4d401f, mp4a.40.2"',
+      width: Number(meta.width || 0),
+      height: Number(meta.height || 0),
+      fps: Number(meta.fps || 0),
+      qualityLabel: meta.height ? `${meta.height}p` : "Original",
+      // Progressive file (audio muxed in) — flag audio so the client downloads
+      // it once instead of pulling the stream twice to re-mux it.
+      audioQuality: "SOURCE_AUDIO",
+      audioChannels: 2,
+      hasVideo: true,
+      hasAudio: true,
+    },
+    {
+      itag: 1001,
+      url: audioUrl || videoUrl,
+      mimeType: 'audio/mp4; codecs="mp4a.40.2"',
+      audioQuality: "SOURCE_AUDIO",
+      audioChannels: 2,
+      hasVideo: false,
+      hasAudio: true,
+      derivedFromVideo: true,
+    },
+  ];
+}
+
+async function resolveViaTikwm(target) {
+  const response = await fetch(`https://www.tikwm.com/api/?hd=1&url=${encodeURIComponent(target)}`, {
+    headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", accept: "application/json" },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) throw new Error(`tikwm returned ${response.status}`);
+  const payload = await response.json();
+  const data = payload?.data;
+  if (payload?.code !== 0 || !data) throw new Error(payload?.msg || "TikTok resolve failed");
+  const video = data.hdplay || data.play || data.wmplay;
+  if (!video || !allowedTarget(video)) throw new Error("TikTok did not expose a downloadable video");
+  const audio = allowedTarget(data.music || "") ? data.music : video;
+  return {
+    title: data.title || "TikTok video",
+    author: data.author?.nickname || data.author?.unique_id || "TikTok",
+    durationSeconds: Number(data.duration || 0),
+    thumbnail: data.cover || data.origin_cover || "",
+    formats: directSocialFormats(video, audio),
+  };
+}
+
+async function resolveViaCobalt(target) {
+  let lastError;
+  for (const base of COBALT_INSTANCES) {
+    try {
+      const response = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", "user-agent": "Mozilla/5.0" },
+        body: JSON.stringify({ url: target, videoQuality: "max", filenameStyle: "basic" }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const data = await response.json();
+      let mediaUrl = ["tunnel", "redirect"].includes(data?.status) ? data.url : null;
+      if (!mediaUrl && data?.status === "picker" && Array.isArray(data.picker)) {
+        mediaUrl = (data.picker.find((item) => item.type === "video") || data.picker[0])?.url || null;
+      }
+      if (mediaUrl && allowedTarget(mediaUrl)) return { url: mediaUrl, filename: data.filename };
+      throw new Error(data?.error?.code || `cobalt status ${data?.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("cobalt resolution failed");
+}
+
+function socialHandle(target) {
+  try {
+    const match = new URL(target).pathname.match(/@([\w.]+)/);
+    return match ? `@${match[1]}` : "";
+  } catch {
+    return "";
+  }
+}
+
+async function resolveSocialDirect(target) {
+  const host = new URL(target).hostname;
+  const isTikTok = host === "tiktok.com" || host.endsWith(".tiktok.com");
+  const platform = isTikTok ? "TikTok" : host.endsWith("instagram.com") ? "Instagram" : "Facebook";
+  const handle = socialHandle(target);
+  const label = handle ? `${platform} · ${handle}` : `${platform} video`;
+
+  if (isTikTok) {
+    try {
+      return await resolveViaTikwm(target);
+    } catch (tikwmError) {
+      const cobalt = await resolveViaCobalt(target).catch(() => { throw tikwmError; });
+      return { title: label, author: handle || "TikTok", durationSeconds: 0, thumbnail: "", formats: directSocialFormats(cobalt.url, cobalt.url) };
+    }
+  }
+  const cobalt = await resolveViaCobalt(target);
+  return { title: label, author: handle || platform, durationSeconds: 0, thumbnail: "", formats: directSocialFormats(cobalt.url, cobalt.url) };
+}
+
 async function resolveSocialWithBrowser(env, target) {
   const browser = await launchBrowser(env);
   const existingPages = await browser.pages();
@@ -769,11 +881,25 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const target = requestUrl.searchParams.get("url") || "";
       if (!allowedSocialSource(target)) return json({ error: "Unsupported social media link" }, 400, origin);
-      try {
-        return json(await resolveSocialWithBrowser(env, target), 200, origin);
-      } catch (error) {
-        return json({ error: String(error?.message || "Could not resolve this public post") }, 502, origin);
+      // Free direct resolvers first (tikwm for TikTok, cobalt for IG/FB); the
+      // browser resolver is a fallback and is unavailable on the free plan.
+      const socialErrors = [];
+      for (const [label, resolve] of [
+        ["direct", () => resolveSocialDirect(target)],
+        ["browser", () => resolveSocialWithBrowser(env, target)],
+      ]) {
+        try {
+          return json(await resolve(), 200, origin);
+        } catch (error) {
+          socialErrors.push(`${label}: ${error?.message || error}`);
+        }
       }
+      const host = (() => { try { return new URL(target).hostname.replace(/^www\./, ""); } catch { return "This"; } })();
+      const isMeta = /instagram\.com|facebook\.com|fb\.watch/.test(host);
+      const message = isMeta
+        ? "Instagram and Facebook block free extraction right now. TikTok and YouTube links work."
+        : "Could not read this post. Try a TikTok or YouTube link.";
+      return json({ error: message, detail: socialErrors.join(" · ") }, 502, origin);
     }
 
     if (!["GET", "HEAD", "POST"].includes(request.method)) return json({ error: "Method not allowed" }, 405, origin);
