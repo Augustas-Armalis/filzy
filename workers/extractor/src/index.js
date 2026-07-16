@@ -8,6 +8,8 @@ const TARGET_HOSTS = [
   "ytimg.com",
   "ggpht.com",
   "googleusercontent.com",
+  "piped.private.coffee",
+  "kavin.rocks",
   "tiktokcdn.com",
   "tiktokcdn-us.com",
   "tiktokcdn-eu.com",
@@ -20,8 +22,9 @@ const TARGET_HOSTS = [
 ];
 const SOCIAL_SOURCE_HOSTS = ["tiktok.com", "instagram.com", "facebook.com", "fb.watch"];
 const REQUEST_HEADERS = new Set(["accept", "accept-language", "content-type", "range", "user-agent", "x-origin"]);
-const RESPONSE_HEADERS = ["content-type", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"];
+const RESPONSE_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"];
 const QUALITY_PRIORITY = ["highres", "hd2160", "hd1440", "hd1080", "hd720", "large", "medium", "small", "tiny"];
+const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks"];
 
 function allowedTarget(value) {
   try {
@@ -47,7 +50,7 @@ function corsHeaders(origin) {
   const headers = new Headers({
     "access-control-allow-methods": "GET, HEAD, POST, OPTIONS",
     "access-control-allow-headers": "Accept, Accept-Language, Content-Type, Range, X-Goog-Visitor-Id, X-Origin, X-Youtube-Client-Name, X-Youtube-Client-Version",
-    "access-control-expose-headers": "Content-Range, Accept-Ranges, Content-Type",
+    "access-control-expose-headers": "Content-Length, Content-Range, Accept-Ranges, Content-Type",
     "access-control-max-age": "86400",
     "vary": "Origin",
   });
@@ -92,6 +95,80 @@ function playerFormats(playerResponse, capturedUrls) {
       return captured || directUrl ? { ...format, url: captured?.url || directUrl } : null;
     })
     .filter(Boolean);
+}
+
+function pipedFormat(stream, index, kind) {
+  const url = new URL(stream.url);
+  const itag = Number(stream.itag || url.searchParams.get("itag") || (kind === "audio" ? 800_000 : 700_000) + index);
+  const height = Number(stream.height || String(stream.quality || "").match(/(\d+)p/i)?.[1] || 0);
+  const mimeType = stream.mimeType || (kind === "audio" ? "audio/mp4" : "video/mp4");
+  const hasAudio = kind === "audio" || stream.videoOnly === false;
+  return {
+    itag,
+    url: stream.url,
+    mimeType,
+    width: Number(stream.width || 0),
+    height,
+    fps: Number(stream.fps || 0),
+    bitrate: Number(stream.bitrate || 0),
+    contentLength: Math.max(0, Number(stream.contentLength || 0)),
+    qualityLabel: kind === "video" ? (stream.quality || (height ? `${height}p` : "Original")) : undefined,
+    audioQuality: hasAudio ? "AUDIO_QUALITY_MEDIUM" : undefined,
+    audioChannels: hasAudio ? 2 : undefined,
+    hasVideo: kind === "video",
+    hasAudio,
+  };
+}
+
+async function resolveWithPiped(videoId) {
+  let lastError;
+  for (const api of PIPED_APIS) {
+    try {
+      const response = await fetch(`${api}/streams/${videoId}`, {
+        headers: { accept: "application/json", "user-agent": "Filzy/1.0" },
+        signal: AbortSignal.timeout(6_500),
+      });
+      if (!response.ok) throw new Error(`Piped returned ${response.status}`);
+      const payload = await response.json();
+      const audio = (payload.audioStreams || [])
+        .filter((stream) => stream?.url && allowedTarget(stream.url) && !/hls/i.test(stream.format || stream.mimeType || ""))
+        .map((stream, index) => pipedFormat(stream, index, "audio"));
+      const video = (payload.videoStreams || [])
+        .filter((stream) => stream?.url && allowedTarget(stream.url) && !/hls|m3u8/i.test(stream.format || stream.mimeType || ""))
+        .map((stream, index) => pipedFormat(stream, index, "video"));
+      if (!video.length && !audio.length) throw new Error("Piped returned no downloadable streams");
+
+      const formats = [...video, ...audio];
+      if (!audio.length) {
+        const combined = video.find((format) => format.hasAudio);
+        if (combined) {
+          formats.push({
+            ...combined,
+            itag: 900_000 + Number(combined.itag || 0),
+            mimeType: "audio/mp4; codecs=\"mp4a.40.2\"",
+            width: undefined,
+            height: undefined,
+            fps: undefined,
+            qualityLabel: undefined,
+            hasVideo: false,
+            hasAudio: true,
+            derivedFromVideo: true,
+          });
+        }
+      }
+
+      return {
+        title: payload.title || "YouTube video",
+        author: payload.uploader || "YouTube",
+        durationSeconds: Number(payload.duration || 0),
+        thumbnail: payload.thumbnailUrl || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        formats,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("No direct extraction source was available");
 }
 
 async function launchBrowser(env) {
@@ -584,10 +661,17 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const videoId = requestUrl.searchParams.get("videoId") || "";
       if (!/^[\w-]{11}$/.test(videoId)) return json({ error: "Invalid YouTube video id" }, 400, origin);
+      let directError;
       try {
-        return json(await resolveWithBrowser(env, videoId), 200, origin);
+        return json(await resolveWithPiped(videoId), 200, origin);
       } catch (error) {
-        return json({ error: String(error?.message || "Could not resolve this YouTube video") }, 502, origin);
+        directError = error;
+        try {
+          return json(await resolveWithBrowser(env, videoId), 200, origin);
+        } catch (error) {
+          const message = [directError?.message, error?.message].filter(Boolean).join(" · ");
+          return json({ error: message || "Could not resolve this YouTube video" }, 502, origin);
+        }
       }
     }
 

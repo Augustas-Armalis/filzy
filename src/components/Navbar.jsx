@@ -30,7 +30,6 @@ function ToolLink({ item, mobile = false, onClick }) {
     <NavLink
       to={item.to}
       end={item.end}
-      viewTransition
       onClick={onClick}
       className={({ isActive }) =>
         cn(
