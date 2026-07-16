@@ -27,8 +27,8 @@ const STATUS = {
 };
 
 // Static shell (StreamStopped / recipient). Animated cards use CARD_SHELL + CARD_INNER below.
-const CARD = "flex w-[280px] max-w-full shrink-0 flex-col gap-[8px] rounded-2xl border border-white/20 bg-white/50 p-[8px] backdrop-blur-[16px]";
-const CARD_SHELL = "w-[280px] max-w-full shrink-0 overflow-hidden rounded-2xl border border-white/20 bg-white/50 backdrop-blur-[16px]";
+const CARD = "glass-surface flex w-[280px] max-w-full shrink-0 flex-col gap-[8px] rounded-2xl border border-white/30 bg-white/55 p-[8px]";
+const CARD_SHELL = "glass-surface w-[280px] max-w-full shrink-0 overflow-hidden rounded-2xl border border-white/30 bg-white/55";
 const CARD_INNER = "flex flex-col gap-[8px] p-[8px]";
 const CTA = "flex h-[38px] items-center justify-center rounded-[11px] bg-text font-casser text-[16px] font-normal text-white cursor-pointer transition-all duration-150 hover:bg-text-hover";
 

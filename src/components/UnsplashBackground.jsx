@@ -97,7 +97,7 @@ export function UnsplashBackground({ onPhoto, sceneKey }) {
   };
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-text">
+    <div className="filzy-background fixed inset-0 overflow-hidden bg-text">
       {previous && <PhotoScene key={previous.id} scene={previous} active={false} visible={!ready} onReady={() => {}} />}
       <PhotoScene key={current.id} scene={current} active visible={!previous || ready} onReady={markReady} />
     </div>

@@ -235,7 +235,7 @@ export default function Home() {
         <motion.div
           animate={{ height: cardHeight ?? "auto" }}
           transition={{ duration: 0.3, ease: "easeOut" }}
-          className="w-full max-w-[280px] overflow-hidden rounded-2xl border border-white/20 bg-white/50 backdrop-blur-[16px]"
+          className="glass-surface w-full max-w-[280px] overflow-hidden rounded-2xl border border-white/30 bg-white/55"
         >
           <div ref={innerRef} className="flex flex-col gap-[8px] p-[8px]">
 

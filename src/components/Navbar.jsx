@@ -30,6 +30,7 @@ function ToolLink({ item, mobile = false, onClick }) {
     <NavLink
       to={item.to}
       end={item.end}
+      viewTransition
       onClick={onClick}
       className={({ isActive }) =>
         cn(
@@ -95,7 +96,7 @@ export function Navbar() {
   return (
     <nav
       aria-label="Main navigation"
-      className="pointer-events-auto fixed left-[10px] right-[10px] top-[10px] z-30 flex items-center justify-between lg:left-4 lg:right-4 lg:top-4"
+      className="filzy-nav pointer-events-auto fixed left-[10px] right-[10px] top-[10px] z-30 flex items-center justify-between lg:left-4 lg:right-4 lg:top-4"
     >
       <Logo />
 

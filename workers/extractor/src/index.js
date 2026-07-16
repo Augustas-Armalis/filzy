@@ -78,7 +78,18 @@ function playerFormats(playerResponse, capturedUrls) {
   return formats
     .map((format) => {
       const captured = capturedUrls.find((entry) => Number(entry.itag) === Number(format.itag));
-      return captured ? { ...format, url: captured.url } : null;
+      let directUrl = "";
+      if (!captured && format.url) {
+        try {
+          const url = new URL(format.url);
+          if (url.hostname.endsWith("googlevideo.com") && url.pathname.includes("videoplayback")) {
+            directUrl = cleanMediaUrl(format.url);
+          }
+        } catch {
+          // Signed/cipher-only entries are discovered through the live player requests.
+        }
+      }
+      return captured || directUrl ? { ...format, url: captured?.url || directUrl } : null;
     })
     .filter(Boolean);
 }
@@ -89,32 +100,31 @@ async function launchBrowser(env) {
     const idle = sessions
       .filter((session) => !session.connectionId)
       .sort((a, b) => Number(a.startTime || 0) - Number(b.startTime || 0));
-    if (sessions.length >= 2 && idle.length) {
-      const stale = await puppeteer.connect(env.BROWSER, idle[0].sessionId);
-      await stale.close().catch(() => {});
-    }
+    if (idle.length) return await puppeteer.connect(env.BROWSER, idle.at(-1).sessionId);
   } catch {
-    // Session cleanup is best effort; launch still reports the real limit.
+    // A stale session may disappear between listing and reconnecting.
   }
-  return puppeteer.launch(env.BROWSER, { keep_alive: 120_000 });
+  return puppeteer.launch(env.BROWSER, { keep_alive: 180_000 });
 }
 
 async function resolveWithBrowser(env, videoId) {
   const browser = await launchBrowser(env);
+  const existingPages = await browser.pages();
   const page = await browser.newPage();
+  await Promise.all(existingPages.map((existing) => existing.close().catch(() => {})));
   const captured = new Map();
+  const childSessions = [];
+  const childAttachTasks = new Set();
   let cdp;
   let keepSession = false;
+  let attachMediaTarget = () => {};
 
   try {
     await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
     await page.evaluateOnNewDocument(() => {
-      try {
-        Object.defineProperty(globalThis, "MediaSource", { value: undefined, configurable: true });
-        Object.defineProperty(globalThis, "WebKitMediaSource", { value: undefined, configurable: true });
-      } catch {
-        // The request/currentSrc capture remains available when a runtime locks these globals.
-      }
+      // Keep MediaSource available, but make YouTube use its main-thread media
+      // pipeline so the page CDP session can observe the signed byte requests.
+      Object.defineProperty(globalThis, "Worker", { configurable: true, value: undefined });
     });
     await page.setCookie({
       name: "CONSENT",
@@ -132,29 +142,65 @@ async function resolveWithBrowser(env, videoId) {
         // Ignore unrelated or malformed browser requests.
       }
     };
+    attachMediaTarget = (target) => {
+      if (!["worker", "service_worker", "shared_worker"].includes(target.type?.())) return;
+      const task = (async () => {
+        try {
+          const session = await target.createCDPSession();
+          childSessions.push(session);
+          await session.send("Network.enable");
+          session.on("Network.requestWillBeSent", (event) => capture(event.request?.url));
+          session.on("Network.responseReceived", (event) => capture(event.response?.url));
+        } catch {
+          // Some shared browser targets disappear before CDP can attach.
+        }
+      })();
+      childAttachTasks.add(task);
+      task.finally(() => childAttachTasks.delete(task));
+    };
+    browser.on("targetcreated", attachMediaTarget);
+    for (const target of browser.targets()) attachMediaTarget(target);
     page.on("request", (event) => capture(event.url()));
     try {
       cdp = await page.target().createCDPSession();
       await cdp.send("Network.enable");
+      await cdp.send("Network.setBypassServiceWorker", { bypass: true });
+      await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
       cdp.on("Network.requestWillBeSent", (event) => capture(event.request?.url));
       cdp.on("Network.responseReceived", (event) => capture(event.response?.url));
     } catch {
       cdp = null;
     }
 
-    await page.goto(`https://www.youtube.com/watch?v=${videoId}&autoplay=1`, {
+    await page.goto(`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1`, {
       waitUntil: "domcontentloaded",
       timeout: 15_000,
     });
     await page.waitForSelector("#movie_player", { timeout: 10_000 });
 
-    const playerResponseText = await page.evaluate(() => {
-      const response = globalThis.ytInitialPlayerResponse
+    let playerResponseText = await page.evaluate(() => {
+      const response = document.getElementById("movie_player")?.getPlayerResponse?.()
+        || globalThis.ytInitialPlayerResponse
         || globalThis.ytplayer?.config?.args?.raw_player_response
         || null;
       return typeof response === "string" ? response : JSON.stringify(response);
     });
-    const playerResponse = JSON.parse(playerResponseText || "null");
+    let playerResponse = JSON.parse(playerResponseText || "null");
+    if (playerResponse?.playabilityStatus?.status !== "OK") {
+      await page.goto(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+      await page.waitForSelector("#movie_player", { timeout: 10_000 });
+      playerResponseText = await page.evaluate(() => {
+        const response = document.getElementById("movie_player")?.getPlayerResponse?.()
+          || globalThis.ytInitialPlayerResponse
+          || globalThis.ytplayer?.config?.args?.raw_player_response
+          || null;
+        return typeof response === "string" ? response : JSON.stringify(response);
+      });
+      playerResponse = JSON.parse(playerResponseText || "null");
+    }
     if (playerResponse?.playabilityStatus?.status !== "OK") {
       throw new Error(playerResponse?.playabilityStatus?.reason || "YouTube did not return a playable source");
     }
@@ -190,6 +236,7 @@ async function resolveWithBrowser(env, videoId) {
       await new Promise((resolve) => setTimeout(resolve, 1_100));
     }
     await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await Promise.allSettled([...childAttachTasks]);
 
     const performanceUrls = JSON.parse(await page.evaluate(() => JSON.stringify(
       performance.getEntriesByType("resource")
@@ -255,12 +302,13 @@ async function resolveWithBrowser(env, videoId) {
       formats: outputFormats,
     };
   } finally {
+    browser.off("targetcreated", attachMediaTarget);
+    await Promise.all(childSessions.map((session) => session.detach().catch(() => {})));
     await cdp?.detach().catch(() => {});
-    if (keepSession) await browser.disconnect().catch(() => {});
-    else {
+    if (!keepSession) {
       await page.close().catch(() => {});
-      await browser.close().catch(() => {});
     }
+    await browser.disconnect().catch(() => {});
   }
 }
 
@@ -275,7 +323,9 @@ function allowedSocialSource(value) {
 
 async function resolveSocialWithBrowser(env, target) {
   const browser = await launchBrowser(env);
+  const existingPages = await browser.pages();
   const page = await browser.newPage();
+  await Promise.all(existingPages.map((existing) => existing.close().catch(() => {})));
   const mediaRequests = [];
   let keepSession = false;
   try {
@@ -395,7 +445,34 @@ async function browserMediaChunk(env, sessionId, target, range, closeAfter) {
       options: { disableCache: true, includeCredentials: false },
     });
     const resource = loaded.resource;
-    if (!resource?.success || !resource.stream) throw new Error(resource?.netErrorName || `Source returned ${resource?.httpStatusCode || "an error"}`);
+    if (!resource?.success || !resource.stream) {
+      const fallback = await page.evaluate(async (url) => {
+        const response = await fetch(url, { cache: "no-store", credentials: "include" });
+        const buffer = new Uint8Array(await response.arrayBuffer());
+        let binary = "";
+        for (let start = 0; start < buffer.length; start += 0x8000) {
+          binary += String.fromCharCode(...buffer.subarray(start, start + 0x8000));
+        }
+        return {
+          ok: response.ok,
+          status: response.status,
+          data: btoa(binary),
+          contentType: response.headers.get("content-type"),
+          contentRange: response.headers.get("content-range"),
+        };
+      }, mediaUrl.toString());
+      if (!fallback.ok) throw new Error(`Source returned ${fallback.status || resource?.httpStatusCode || "an error"}`);
+      const binary = atob(fallback.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      const headers = new Headers({
+        "content-type": fallback.contentType || "application/octet-stream",
+        "content-length": String(bytes.byteLength),
+        "accept-ranges": "bytes",
+      });
+      if (fallback.contentRange) headers.set("content-range", fallback.contentRange);
+      return { bytes, headers };
+    }
     const chunks = [];
     let totalBytes = 0;
     while (true) {

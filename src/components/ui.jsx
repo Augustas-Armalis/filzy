@@ -36,7 +36,7 @@ export function GlassCard({ children, className, animateHeight = true, width = "
       animate={animateHeight ? { height: height ?? "auto" } : undefined}
       transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn(
-        "w-full overflow-hidden rounded-2xl border border-white/20 bg-white/50 backdrop-blur-[16px]",
+        "glass-surface w-full overflow-hidden rounded-2xl border border-white/30 bg-white/55",
         width,
         className,
       )}

@@ -25,8 +25,7 @@
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.0",
     "tailwind-merge": "^3.6.0",
-    "yaml": "^2.8.3",
-    "youtubei.js": "^17.2.0"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "^1.1.0",

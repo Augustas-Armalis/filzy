@@ -37,7 +37,7 @@ export function Shell({ children }) {
         to the credits behind it (z-0); each page re-enables its actual cards with
         [&>*]:pointer-events-auto so the content stays fully interactive.
       */}
-      <main className="pointer-events-none relative z-10 flex flex-1 flex-col">{children}</main>
+      <main className="filzy-main pointer-events-none relative z-10 flex flex-1 flex-col">{children}</main>
     </div>
   );
 }
