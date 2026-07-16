@@ -14,7 +14,7 @@ const SOCIAL_HOSTS = new Map([
 
 const DEFAULT_EXTRACT_PROXY = import.meta.env.DEV
   ? "/api/extract-proxy"
-  : "https://filzy-extractor.sendfilzy-cdf.workers.dev";
+  : "https://filzy-extractor.trycapto.workers.dev";
 
 export const EXTRACT_PROXY = (import.meta.env.VITE_EXTRACT_PROXY || DEFAULT_EXTRACT_PROXY).replace(/\/$/, "");
 

@@ -120,6 +120,85 @@ function pipedFormat(stream, index, kind) {
   };
 }
 
+// YouTube's own InnerTube player API returns the full adaptive ladder (up to
+// 2160p) with direct, unsigned media URLs when queried as an app client — no
+// PO token, no signature deciphering, and no browser required. This is the
+// primary free source of real source-quality streams. ANDROID_VR is the most
+// reliable client for this; IOS is the fallback.
+const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const INNERTUBE_CLIENTS = [
+  {
+    name: "ANDROID_VR",
+    ua: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; en_US) gzip",
+    context: { clientName: "ANDROID_VR", clientVersion: "1.60.19", deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L", hl: "en", gl: "US" },
+  },
+  {
+    name: "IOS",
+    ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)",
+    context: { clientName: "IOS", clientVersion: "20.10.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82", hl: "en", gl: "US" },
+  },
+];
+
+function innerTubeFormat(format) {
+  return {
+    itag: Number(format.itag),
+    url: format.url,
+    mimeType: format.mimeType || "application/octet-stream",
+    width: Number(format.width || 0),
+    height: Number(format.height || 0),
+    fps: Number(format.fps || 0),
+    bitrate: Number(format.bitrate || format.averageBitrate || 0),
+    averageBitrate: Number(format.averageBitrate || format.bitrate || 0),
+    contentLength: Math.max(0, Number(format.contentLength || 0)),
+    approxDurationMs: format.approxDurationMs,
+    qualityLabel: format.qualityLabel,
+    audioQuality: format.audioQuality,
+    audioChannels: format.audioChannels,
+    audioSampleRate: format.audioSampleRate,
+    language: format.audioTrack?.displayName,
+    isOriginal: format.audioTrack ? format.audioTrack.audioIsDefault !== false : true,
+  };
+}
+
+async function resolveWithInnerTube(videoId) {
+  let lastError;
+  for (const client of INNERTUBE_CLIENTS) {
+    try {
+      const response = await fetch(`https://youtubei.googleapis.com/youtubei/v1/player?key=${INNERTUBE_KEY}&prettyPrint=false`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": client.ua,
+          "x-goog-api-format-version": "2",
+          origin: "https://www.youtube.com",
+        },
+        body: JSON.stringify({ context: { client: client.context }, videoId, contentCheckOk: true, racyCheckOk: true }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) throw new Error(`InnerTube ${client.name} returned ${response.status}`);
+      const data = await response.json();
+      const status = data?.playabilityStatus?.status;
+      if (status !== "OK") throw new Error(`${client.name}: ${data?.playabilityStatus?.reason || status || "unplayable"}`);
+      const streamingData = data.streamingData || {};
+      const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || [])]
+        .filter((format) => format?.url && allowedTarget(format.url))
+        .map(innerTubeFormat);
+      if (!formats.length) throw new Error(`InnerTube ${client.name} exposed no direct formats`);
+      const details = data.videoDetails || {};
+      return {
+        title: details.title || "YouTube video",
+        author: details.author || "YouTube",
+        durationSeconds: Number(details.lengthSeconds || 0),
+        thumbnail: details.thumbnail?.thumbnails?.at(-1)?.url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        formats,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("InnerTube resolution failed");
+}
+
 async function resolveWithPiped(videoId) {
   let lastError;
   for (const api of PIPED_APIS) {
@@ -667,22 +746,23 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const videoId = requestUrl.searchParams.get("videoId") || "";
       if (!/^[\w-]{11}$/.test(videoId)) return json({ error: "Invalid YouTube video id" }, 400, origin);
-      // Piped is the fast path and returns immediately. The browser resolver is
-      // only attempted when Piped fails outright — on the free plan Browser
-      // Rendering is unavailable, so trying it on every resolve would just add
-      // latency before falling back. Keep Piped's result even at 360p.
-      let directError;
-      try {
-        return json(await resolveWithPiped(videoId), 200, origin);
-      } catch (error) {
-        directError = error;
+      // InnerTube (ANDROID_VR/IOS clients) is the primary source: it returns
+      // the full adaptive ladder up to 2160p with direct, unsigned URLs for
+      // free. Piped is a fallback for the rare video InnerTube refuses, and the
+      // browser resolver is the last resort (unavailable on the free plan).
+      const errors = [];
+      for (const [label, resolve] of [
+        ["innertube", () => resolveWithInnerTube(videoId)],
+        ["piped", () => resolveWithPiped(videoId)],
+        ["browser", () => resolveWithBrowser(env, videoId)],
+      ]) {
         try {
-          return json(await resolveWithBrowser(env, videoId), 200, origin);
-        } catch (browserError) {
-          const message = [directError?.message, browserError?.message].filter(Boolean).join(" · ");
-          return json({ error: message || "Could not resolve this YouTube video" }, 502, origin);
+          return json(await resolve(), 200, origin);
+        } catch (error) {
+          errors.push(`${label}: ${error?.message || error}`);
         }
       }
+      return json({ error: errors.join(" · ") || "Could not resolve this YouTube video" }, 502, origin);
     }
 
     if (requestUrl.pathname === "/resolve-social") {
