@@ -121,14 +121,20 @@ function chosenHeight(sourceHeight, requested, videoKbps) {
 function chosenFps(requested, videoKbps) {
   if (requested && requested !== "auto" && requested !== "original") return Number(requested);
   if (requested === "original") return 0;
-  return videoKbps < 700 ? 24 : 30;
+  // Preserve the source cadence by default. Rebuilding every timestamp at an
+  // arbitrary 30 FPS adds work and can make motion worse; only reduce cadence
+  // for extremely constrained targets where it materially saves bits.
+  return videoKbps < 700 ? 24 : 0;
 }
 
 export function planVideoCompression(file, meta = {}, opts = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
   const targetBytes = compressionTargetBytes(file, opts);
   const duration = meta.duration || 0;
-  const totalKbps = duration ? (targetBytes * 8 * 0.94) / 1000 / duration : 1400;
+  // Hardware encoders and container metadata can overshoot a nominal bitrate.
+  // Reserve enough overhead to hit the requested size in one pass instead of
+  // doing the old second full encode.
+  const totalKbps = duration ? (targetBytes * 8 * 0.88) / 1000 / duration : 1400;
   const audioKbps = settings.keepAudio ? Math.min(Number(settings.videoAudioBitrate) || 128, Math.max(48, totalKbps * 0.22)) : 0;
   const smartBitrate = Math.max(120, Math.round(totalKbps - audioKbps));
   const sourceVideoKbps = Math.max(120, sourceBitrateKbps(file, duration) - audioKbps);
@@ -200,9 +206,69 @@ function outputName(file, extension) {
 }
 
 function videoPreset(value) {
-  if (value === "best") return "medium";
+  if (value === "best") return "veryfast";
   if (value === "fast") return "ultrafast";
-  return "veryfast";
+  return "superfast";
+}
+
+async function compressVideoHardware(file, meta, opts, plan, settings, outputNameValue) {
+  if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+    throw new Error("Hardware video codecs are unavailable");
+  }
+  const {
+    ALL_FORMATS,
+    BlobSource,
+    BufferTarget,
+    Conversion,
+    Input,
+    Mp4OutputFormat,
+    Output,
+  } = await import("mediabunny");
+  throwIfAborted(opts.signal);
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  const target = new BufferTarget();
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: false }),
+    target,
+  });
+  let conversion = null;
+  const cancel = () => void conversion?.cancel();
+  opts.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    opts.onStatus?.("Compressing with hardware acceleration…");
+    conversion = await Conversion.init({
+      input,
+      output,
+      tracks: "primary",
+      video: {
+        codec: "avc",
+        bitrate: plan.videoKbps * 1000,
+        ...(plan.height && (!meta.height || meta.height > plan.height) ? { height: plan.height } : {}),
+        ...(plan.fps ? { frameRate: plan.fps } : {}),
+        hardwareAcceleration: "prefer-hardware",
+        keyFrameInterval: 5,
+      },
+      audio: settings.keepAudio
+        ? { codec: "aac", bitrate: Math.max(48, plan.audioKbps) * 1000 }
+        : { discard: true },
+      showWarnings: false,
+    });
+    if (!conversion.isValid) throw new Error("This video's codec needs the compatibility engine");
+    conversion.onProgress = (progress) => opts.onProgress?.(Math.max(0, Math.min(0.99, progress)));
+    await conversion.execute();
+    throwIfAborted(opts.signal);
+    if (!target.buffer) throw new Error("The hardware encoder produced no output");
+    opts.onProgress?.(1);
+    return {
+      blob: new Blob([target.buffer], { type: "video/mp4" }),
+      name: outputNameValue,
+      targetBytes: plan.targetBytes,
+      hardwareAccelerated: true,
+    };
+  } finally {
+    opts.signal?.removeEventListener("abort", cancel);
+    input.dispose();
+  }
 }
 
 async function runFfmpeg(file, outName, argsFor, { signal, onStatus, onProgress }) {
@@ -232,9 +298,19 @@ async function compressVideoInternal(file, meta, opts) {
   const settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
   const plan = planVideoCompression(file, meta, opts);
   const output = outputName(file, "mp4");
-  const encode = (videoKbps, progressStart, progressScale) => runFfmpeg(file, output, (input, out) => {
+  try {
+    return await compressVideoHardware(file, meta, opts, plan, settings, output);
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    opts.onStatus?.("Using compatibility engine…");
+  }
+
+  const encode = (videoKbps) => runFfmpeg(file, output, (input, out) => {
     const filters = [];
-    if (plan.height && (!meta.height || meta.height > plan.height)) filters.push(`scale=-2:${plan.height}:flags=lanczos`);
+    if (plan.height && (!meta.height || meta.height > plan.height)) {
+      const scaler = plan.quality === "best" ? "bicubic" : "fast_bilinear";
+      filters.push(`scale=-2:${plan.height}:flags=${scaler}`);
+    }
     if (plan.fps) filters.push(`fps=${plan.fps}`);
     return [
       "-i", input,
@@ -249,17 +325,10 @@ async function compressVideoInternal(file, meta, opts) {
       "-movflags", "+faststart",
       out,
     ];
-  }, { ...opts, onProgress: (progress) => opts.onProgress?.(progressStart + progress * progressScale) });
+  }, opts);
 
   opts.onStatus?.("Compressing video…");
-  let bytes = await encode(plan.videoKbps, 0, 0.76);
-  if (opts.smartTarget !== false && bytes.length > plan.targetBytes * 1.03) {
-    const correctedBitrate = Math.max(120, Math.floor(plan.videoKbps * (plan.targetBytes / bytes.length) * 0.96));
-    if (correctedBitrate < plan.videoKbps) {
-      opts.onStatus?.("Fine-tuning file size…");
-      bytes = await encode(correctedBitrate, 0.76, 0.24);
-    }
-  }
+  const bytes = await encode(plan.videoKbps);
   opts.onProgress?.(1);
   return { blob: new Blob([bytes], { type: "video/mp4" }), name: output, targetBytes: plan.targetBytes };
 }

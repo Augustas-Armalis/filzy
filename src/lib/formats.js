@@ -16,6 +16,10 @@ export const FORMATS = [
   { value: "ico", label: "ICO", mime: "image/x-icon", category: "image", group: "image" },
   { value: "ppm", label: "PPM", mime: "image/x-portable-pixmap", category: "image", group: "image" },
   { value: "tga", label: "TGA", mime: "image/x-tga", category: "image", group: "image" },
+  { value: "pam", label: "PAM", mime: "image/x-portable-arbitrarymap", category: "image", group: "image" },
+  { value: "pbm", label: "PBM", mime: "image/x-portable-bitmap", category: "image", group: "image" },
+  { value: "pcx", label: "PCX", mime: "image/x-pcx", category: "image", group: "image" },
+  { value: "pgm", label: "PGM", mime: "image/x-portable-graymap", category: "image", group: "image" },
   { value: "svg", label: "SVG", mime: "image/svg+xml", category: "image", group: "vector" },
   { value: "mp3", label: "MP3", mime: "audio/mpeg", category: "audio", group: "audio" },
   { value: "wav", label: "WAV", mime: "audio/wav", category: "audio", group: "audio" },
@@ -24,11 +28,30 @@ export const FORMATS = [
   { value: "aac", label: "AAC", mime: "audio/aac", category: "audio", group: "audio" },
   { value: "flac", label: "FLAC", mime: "audio/flac", category: "audio", group: "audio" },
   { value: "opus", label: "OPUS", mime: "audio/opus", category: "audio", group: "audio" },
+  { value: "ac3", label: "AC3", mime: "audio/ac3", category: "audio", group: "audio" },
+  { value: "aiff", label: "AIFF", mime: "audio/aiff", category: "audio", group: "audio" },
+  { value: "au", label: "AU", mime: "audio/basic", category: "audio", group: "audio" },
+  { value: "caf", label: "CAF", mime: "audio/x-caf", category: "audio", group: "audio" },
+  { value: "m4b", label: "M4B", mime: "audio/mp4", category: "audio", group: "audio" },
+  { value: "oga", label: "OGA", mime: "audio/ogg", category: "audio", group: "audio" },
+  { value: "weba", label: "WEBA", mime: "audio/webm", category: "audio", group: "audio" },
+  { value: "wma", label: "WMA", mime: "audio/x-ms-wma", category: "audio", group: "audio" },
   { value: "mp4", label: "MP4", mime: "video/mp4", category: "video", group: "video" },
   { value: "webm", label: "WEBM", mime: "video/webm", category: "video", group: "video" },
   { value: "mov", label: "MOV", mime: "video/quicktime", category: "video", group: "video" },
   { value: "mkv", label: "MKV", mime: "video/x-matroska", category: "video", group: "video" },
   { value: "avi", label: "AVI", mime: "video/x-msvideo", category: "video", group: "video" },
+  { value: "3gp", label: "3GP", mime: "video/3gpp", category: "video", group: "video" },
+  { value: "3g2", label: "3G2", mime: "video/3gpp2", category: "video", group: "video" },
+  { value: "flv", label: "FLV", mime: "video/x-flv", category: "video", group: "video" },
+  { value: "m4v", label: "M4V", mime: "video/x-m4v", category: "video", group: "video" },
+  { value: "mpeg", label: "MPEG", mime: "video/mpeg", category: "video", group: "video" },
+  { value: "mpg", label: "MPG", mime: "video/mpeg", category: "video", group: "video" },
+  { value: "ogv", label: "OGV", mime: "video/ogg", category: "video", group: "video" },
+  { value: "ts", label: "TS", mime: "video/mp2t", category: "video", group: "video" },
+  { value: "m2ts", label: "M2TS", mime: "video/mp2t", category: "video", group: "video" },
+  { value: "vob", label: "VOB", mime: "video/dvd", category: "video", group: "video" },
+  { value: "wmv", label: "WMV", mime: "video/x-ms-wmv", category: "video", group: "video" },
   { value: "txt", label: "TXT", mime: "text/plain", category: "text", group: "document" },
   { value: "md", label: "MD", mime: "text/markdown", category: "text", group: "document" },
   { value: "html", label: "HTML", mime: "text/html", category: "text", group: "document" },
@@ -64,7 +87,7 @@ export const FORMAT_GROUP_META = {
 
 export const FORMAT_GROUPS = [
   { id: "document", values: ["abw", "djvu", "doc", "docm", "docx", "dot", "dotx", "html", "hwp", "hwpx", "json", "lwp", "md", "odt", "pages", "pdf", "rst", "rtf", "sdw", "tex", "txt", "wpd", "wps", "xml", "yaml", "zabw"] },
-  { id: "image", values: ["3fr", "arw", "avif", "bmp", "cr2", "cr3", "crw", "dcr", "dng", "eps", "erf", "gif", "heic", "heif", "icns", "ico", "jfif", "jpeg", "jpg", "mos", "mrw", "nef", "odd", "odg", "orf", "pef", "png", "ppm", "ps", "psb", "psd", "pub", "raf", "raw", "rw2", "tga", "tif", "tiff", "webp", "x3f", "xcf", "xps"] },
+  { id: "image", values: ["3fr", "arw", "avif", "bmp", "cr2", "cr3", "crw", "dcr", "dng", "eps", "erf", "gif", "heic", "heif", "icns", "ico", "jfif", "jpeg", "jpg", "mos", "mrw", "nef", "odd", "odg", "orf", "pam", "pbm", "pcx", "pef", "pgm", "png", "ppm", "ps", "psb", "psd", "pub", "raf", "raw", "rw2", "tga", "tif", "tiff", "webp", "x3f", "xcf", "xps"] },
   { id: "video", values: ["3g2", "3gp", "3gpp", "avi", "cavs", "dv", "dvr", "flv", "m2ts", "m4v", "mkv", "mod", "mov", "mp4", "mpeg", "mpg", "mts", "mxf", "ogg", "ogv", "rm", "rmvb", "swf", "ts", "vob", "webm", "wmv", "wtv"] },
   { id: "audio", values: ["aac", "ac3", "aif", "aifc", "aiff", "amr", "au", "caf", "dss", "flac", "m4a", "m4b", "mp3", "oga", "opus", "sf2", "sfark", "voc", "wav", "weba", "wma"] },
   { id: "spreadsheet", values: ["csv", "et", "numbers", "ods", "sdc", "xls", "xlsm", "xlsx"] },
@@ -82,7 +105,7 @@ export const POPULAR_FORMAT_VALUES = [
 ];
 
 const BY_VALUE = Object.fromEntries(FORMATS.map((format) => [format.value, format]));
-const ALIAS = { jpeg: "jpg", tif: "tiff", qt: "mov", oga: "ogg" };
+const ALIAS = { jpeg: "jpg", jfif: "jpg", tif: "tiff", qt: "mov", aif: "aiff", aifc: "aiff" };
 const LOCAL_OUTPUTS = new Set(FORMATS.map((format) => format.value));
 const MEDIA_INPUT_GROUPS = new Set(["image", "audio", "video"]);
 
@@ -111,7 +134,7 @@ export function normalizeFormatValue(value) {
 export const FORMAT_CATALOG = FORMAT_GROUPS.flatMap(({ id, values }) => values.map((value) => {
   const local = BY_VALUE[normalizeFormatValue(value)];
   const inputAvailable = MEDIA_INPUT_GROUPS.has(id) || value === "svg";
-  const outputAvailable = LOCAL_OUTPUTS.has(normalizeFormatValue(value)) && !["jpeg", "tif", "oga"].includes(value);
+  const outputAvailable = LOCAL_OUTPUTS.has(normalizeFormatValue(value));
   return {
     value,
     label: value.toUpperCase(),
@@ -222,7 +245,9 @@ export function pickerCatalog(enabledValues, mode = "output") {
     ...format,
     // Every catalog format can be selected as an input. Output capability is
     // stricter and communicated in-place with disabled “Soon” entries.
-    disabled: mode === "input" ? false : !enabled.has(format.value),
+    disabled: mode === "input"
+      ? false
+      : !enabled.has(format.value) && !enabled.has(normalizeFormatValue(format.value)),
   }));
 }
 

@@ -1,11 +1,15 @@
-import { EXTRACT_PROXY, normalizeYouTubeFormat } from "@/lib/extract";
+import { EXTRACT_FALLBACK_PROXY, EXTRACT_PROXY, normalizeYouTubeFormat } from "@/lib/extract";
 
 function abortError() {
   return new DOMException("Extraction cancelled", "AbortError");
 }
 
-function resolveEndpoint(videoId) {
-  const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+function workerProxies() {
+  return [...new Set([EXTRACT_PROXY, EXTRACT_FALLBACK_PROXY])];
+}
+
+function resolveEndpoint(videoId, proxy = EXTRACT_PROXY) {
+  const endpoint = new URL(proxy, window.location.origin);
   endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/resolve`;
   endpoint.search = "";
   endpoint.searchParams.set("videoId", videoId);
@@ -33,32 +37,48 @@ async function resolveThroughWorker(source, { signal, onPhase } = {}) {
   onPhase?.("Checking available formats…");
   let payload = {};
   let response;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    response = await fetch(resolveEndpoint(source.videoId), { signal, headers: { accept: "application/json" } });
-    payload = await response.json().catch(() => ({}));
-    if (response.ok) break;
-    const transient = [429, 502, 503].includes(response.status);
-    if (!transient || attempt === 2) throw new Error(payload.error || `The extraction Worker returned ${response.status}.`);
-    onPhase?.("Retrying source…");
-    await new Promise((resolve, reject) => {
-      const onAbort = () => {
-        window.clearTimeout(timeout);
-        signal?.removeEventListener("abort", onAbort);
-        reject(abortError());
-      };
-      const timeout = window.setTimeout(() => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve();
-      }, 650 * (attempt + 1));
-      if (signal?.aborted) {
-        onAbort();
-        return;
+  let resolvedProxy = EXTRACT_PROXY;
+  let lastError;
+  for (const proxy of workerProxies()) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await fetch(resolveEndpoint(source.videoId, proxy), { signal, headers: { accept: "application/json" } });
+      payload = await response.json().catch(() => ({}));
+      if (response.ok) {
+        resolvedProxy = proxy;
+        lastError = null;
+        break;
       }
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
+      lastError = new Error(payload.error || `The extraction Worker returned ${response.status}.`);
+      const transient = [429, 503].includes(response.status);
+      if (!transient || attempt === 1) break;
+      onPhase?.("Retrying source…");
+      await new Promise((resolve, reject) => {
+        const onAbort = () => {
+          window.clearTimeout(timeout);
+          signal?.removeEventListener("abort", onAbort);
+          reject(abortError());
+        };
+        const timeout = window.setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, 650 * (attempt + 1));
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+    if (response?.ok) break;
+    onPhase?.("Trying another extraction edge…");
   }
+  if (!response?.ok) throw lastError || new Error("No extraction edge was available.");
   const formats = (payload.formats || [])
-    .map((format) => normalizeWorkerFormat({ ...format, workerSessionId: payload.browserSessionId }))
+    .map((format) => normalizeWorkerFormat({
+      ...format,
+      workerSessionId: payload.browserSessionId,
+      workerProxy: resolvedProxy,
+    }))
     .filter((format) => format.itag && format.container && format.raw?.url && (format.hasVideo || format.hasAudio));
   if (!formats.length) throw new Error("No downloadable source formats were returned for this video.");
   return {
@@ -77,15 +97,29 @@ async function resolveThroughWorker(source, { signal, onPhase } = {}) {
 export async function resolveSocialMedia(source, { signal, onPhase } = {}) {
   if (signal?.aborted) throw abortError();
   onPhase?.(`Reading ${source.label}…`);
-  const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
-  endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/resolve-social`;
-  endpoint.search = "";
-  endpoint.searchParams.set("url", source.url);
-  const response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Could not read this ${source.label} post.`);
+  let response;
+  let payload = {};
+  let resolvedProxy = EXTRACT_PROXY;
+  for (const proxy of workerProxies()) {
+    const endpoint = new URL(proxy, window.location.origin);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/resolve-social`;
+    endpoint.search = "";
+    endpoint.searchParams.set("url", source.url);
+    response = await fetch(endpoint, { signal, headers: { accept: "application/json" } });
+    payload = await response.json().catch(() => ({}));
+    if (response.ok) {
+      resolvedProxy = proxy;
+      break;
+    }
+    onPhase?.("Trying another extraction edge…");
+  }
+  if (!response?.ok) throw new Error(payload.error || `Could not read this ${source.label} post.`);
   const formats = (payload.formats || [])
-    .map((format) => normalizeWorkerFormat({ ...format, workerSessionId: payload.browserSessionId }))
+    .map((format) => normalizeWorkerFormat({
+      ...format,
+      workerSessionId: payload.browserSessionId,
+      workerProxy: resolvedProxy,
+    }))
     .filter((format) => format.itag && format.raw?.url);
   if (!formats.length) throw new Error("This post did not expose a public media file.");
   return {

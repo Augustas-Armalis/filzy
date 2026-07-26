@@ -15,6 +15,8 @@ import { useSeo } from "@/lib/seo";
   channel streams files sequentially.
 */
 export default function ReceivePage() {
+  const MAX_BUFFERED_ZIP = 512 * 1024 * 1024;
+  const MAX_BUFFERED_FILE = 512 * 1024 * 1024;
   const { id } = useParams();
   useSeo({
     title: "Receive a Filzy Beam",
@@ -73,13 +75,16 @@ export default function ReceivePage() {
         }
         downloadBlob("filzy-files.zip", zipSync(entries));
         setAllBusy(false);
-        // The card stayed visible with live progress the whole time; onAllComplete
-        // flips to the celebratory "done" screen once every byte has landed.
+        setPhase("done");
       } else if (job.mode === "single") {
         const b = blobs.current.get(job.ids[0]);
         if (b) downloadBlob(nameOf(job.ids[0]), b);
       }
-      // "stream" mode: already written to disk by the receiver — nothing to save.
+      // "stream" / "stream-all": already written to disk by the receiver.
+      if (job.mode === "stream-all") {
+        setAllBusy(false);
+        setPhase("done");
+      }
       active.current = null;
       pump();
     };
@@ -119,7 +124,9 @@ export default function ReceivePage() {
       // jump that hid all progress mid-transfer).
       onAllComplete: () => {
         setSpeed(0);
-        setPhase((p) => (p === "error" || p === "interrupted" ? p : "done"));
+        if (active.current?.mode === "all" || active.current?.mode === "stream-all") {
+          setPhase((p) => (p === "error" || p === "interrupted" ? p : "done"));
+        }
       },
       onError: () => setPhase("error"),
       onSevered: () => setPhase((p) => (p === "done" ? p : "interrupted")),
@@ -163,16 +170,47 @@ export default function ReceivePage() {
         // otherwise fall back to the buffered download below
       }
     }
+    if (f && mode === "single" && f.size > MAX_BUFFERED_FILE) {
+      window.alert("This browser cannot safely hold a file this large in memory. Use Chrome or Edge to stream it directly to disk.");
+      return;
+    }
     setStatus((s) => ({ ...s, [fid]: "downloading" })); // mark now so several can run at once
     queue.current.push({ ids: [fid], mode, done: new Set() });
     rxRef.current?._pump?.();
   };
-  const downloadAll = () => {
+  const downloadAll = async () => {
     if (filesRef.current.length === 0) return;
+    void preventSleep();
+    let mode = "all";
+    if (window.showDirectoryPicker) {
+      const opened = [];
+      try {
+        const directory = await window.showDirectoryPicker({ mode: "readwrite" });
+        for (const file of filesRef.current) {
+          const handle = await directory.getFileHandle(file.name, { create: true });
+          const writable = await handle.createWritable();
+          opened.push({ id: file.id, writable });
+          rxRef.current?.setSink(file.id, writable);
+        }
+        mode = "stream-all";
+      } catch (error) {
+        await Promise.allSettled(opened.map(({ id: fileId, writable }) => {
+          rxRef.current?.clearSink(fileId);
+          return writable.abort?.();
+        }));
+        if (error?.name === "AbortError") return;
+        // Fall through only when the directory API itself is unavailable.
+      }
+    }
+    const total = filesRef.current.reduce((sum, file) => sum + file.size, 0);
+    if (mode === "all" && total > MAX_BUFFERED_ZIP) {
+      window.alert("This browser cannot safely package a transfer this large in memory. Use Chrome or Edge and choose a folder, or download the files one at a time.");
+      return;
+    }
     // Stay on the receive card so the user watches real progress (overall bar +
     // speed + per-file bars) instead of the old stuck "Download started" screen.
     setAllBusy(true);
-    queue.current.push({ ids: filesRef.current.map((f) => f.id), mode: "all", done: new Set() });
+    queue.current.push({ ids: filesRef.current.map((f) => f.id), mode, done: new Set() });
     rxRef.current?._pump?.();
   };
 

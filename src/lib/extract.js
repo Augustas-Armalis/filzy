@@ -14,9 +14,10 @@ const SOCIAL_HOSTS = new Map([
 
 const DEFAULT_EXTRACT_PROXY = import.meta.env.DEV
   ? "/api/extract-proxy"
-  : "https://filzy-extractor.trycapto.workers.dev";
+  : "https://filzy-extractor.sendfilzy-cdf.workers.dev";
 
 export const EXTRACT_PROXY = (import.meta.env.VITE_EXTRACT_PROXY || DEFAULT_EXTRACT_PROXY).replace(/\/$/, "");
+export const EXTRACT_FALLBACK_PROXY = "https://filzy-extractor.trycapto.workers.dev";
 
 export const TARGETS = [
   { value: "mp4", label: "MP4", kind: "video" },

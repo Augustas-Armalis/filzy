@@ -27,6 +27,164 @@ function mimeForTarget(target) {
   return "application/octet-stream";
 }
 
+const DIRECT_RANGE_SIZE = 16 * 1024 * 1024;
+const BROWSER_RANGE_SIZE = 1024 * 1024;
+const DOWNLOAD_RETRIES = 3;
+const tempEntries = new Set();
+
+async function createSpool(mimeType = "application/octet-stream") {
+  try {
+    const root = await navigator.storage?.getDirectory?.();
+    if (!root) throw new Error("OPFS unavailable");
+    const entryName = `filzy-extract-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
+    const handle = await root.getFileHandle(entryName, { create: true });
+    const writable = await handle.createWritable();
+    tempEntries.add(entryName);
+    let closed = false;
+    return {
+      async write(data, position) {
+        await writable.write({ type: "write", position, data });
+      },
+      async finish(name) {
+        if (!closed) {
+          await writable.close();
+          closed = true;
+        }
+        const file = await handle.getFile();
+        // File objects are immutable snapshots, so removing the temporary OPFS
+        // entry does not invalidate the returned result.
+        await root.removeEntry(entryName).catch(() => {});
+        tempEntries.delete(entryName);
+        return new File([file], name, { type: mimeType });
+      },
+      async abort() {
+        if (!closed) {
+          await writable.abort().catch(() => {});
+          closed = true;
+        }
+        await root.removeEntry(entryName).catch(() => {});
+        tempEntries.delete(entryName);
+      },
+      diskBacked: true,
+    };
+  } catch {
+    const chunks = [];
+    return {
+      async write(data) {
+        chunks.push(data.slice ? data.slice() : new Uint8Array(data));
+      },
+      async finish(name) {
+        return new File(chunks, name, { type: mimeType });
+      },
+      async abort() {
+        chunks.length = 0;
+      },
+      diskBacked: false,
+    };
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    if (!tempEntries.size) return;
+    void navigator.storage?.getDirectory?.().then((root) => Promise.all(
+      [...tempEntries].map((name) => root.removeEntry(name).catch(() => {})),
+    ));
+  });
+}
+
+function contentRangeTotal(response) {
+  return Number((response.headers.get("content-range") || "").match(/\/(\d+)$/)?.[1] || 0);
+}
+
+async function waitRetry(attempt, signal) {
+  throwIfAborted(signal);
+  await new Promise((resolve, reject) => {
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, 450 * (attempt + 1));
+    const abort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(abortError());
+    };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function downloadRanged(endpointFor, {
+  signal,
+  onProgress,
+  totalBytes = 0,
+  mimeType,
+  name = "media",
+  rangeSize = DIRECT_RANGE_SIZE,
+} = {}) {
+  const spool = await createSpool(mimeType);
+  let offset = 0;
+  let total = Number(totalBytes || 0);
+  let completed = false;
+  try {
+    while (!total || offset < total) {
+      throwIfAborted(signal);
+      const requestedEnd = total
+        ? Math.min(total - 1, offset + rangeSize - 1)
+        : offset + rangeSize - 1;
+      let requestCompleted = false;
+      for (let attempt = 0; attempt < DOWNLOAD_RETRIES && !requestCompleted; attempt += 1) {
+        try {
+          const response = await fetch(endpointFor(offset, requestedEnd, total), {
+            signal,
+            headers: { range: `bytes=${offset}-${requestedEnd}` },
+          });
+          if (response.status === 416) {
+            completed = true;
+            requestCompleted = true;
+            break;
+          }
+          if (!response.ok || !response.body) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || `The source returned ${response.status}.`);
+          }
+          total = contentRangeTotal(response)
+            || total
+            || Number(response.headers.get("content-length") || 0);
+          const reader = response.body.getReader();
+          let readThisRequest = 0;
+          while (true) {
+            throwIfAborted(signal);
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value?.byteLength) continue;
+            await spool.write(value, offset);
+            offset += value.byteLength;
+            readThisRequest += value.byteLength;
+            onProgress?.(total ? Math.min(0.995, offset / total) : 0);
+          }
+          // A 200 response ignored Range and delivered the complete resource.
+          if (response.status === 200 || (!total && readThisRequest < rangeSize)) completed = true;
+          requestCompleted = true;
+        } catch (error) {
+          if (signal?.aborted || error?.name === "AbortError") throw abortError();
+          if (attempt === DOWNLOAD_RETRIES - 1) throw error;
+          await waitRetry(attempt, signal);
+          // `offset` advances only after a successful disk write, so the next
+          // range resumes exactly where the interrupted response stopped.
+        }
+      }
+      if (completed) break;
+    }
+    onProgress?.(1);
+    return await spool.finish(name);
+  } catch (error) {
+    await spool.abort();
+    throw error;
+  }
+}
+
 async function collectStream(stream, totalBytes, { signal, onProgress } = {}) {
   throwIfAborted(signal);
   const reader = stream.getReader();
@@ -55,39 +213,21 @@ async function downloadBrowserSession(format, options = {}) {
   const target = format.raw?.url;
   const sessionId = format.raw?.workerSessionId;
   if (!target || !sessionId) throw new Error("That extraction session has expired. Inspect the link again.");
-  const chunks = [];
-  const chunkSize = 1024 * 1024;
-  let start = 0;
-  let total = Number(format.bytes || 0);
-  while (!total || start < total) {
-    throwIfAborted(options.signal);
-    const end = total ? Math.min(total - 1, start + chunkSize - 1) : start + chunkSize - 1;
-    const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+  return downloadRanged((start, end, total) => {
+    const endpoint = new URL(format.raw?.workerProxy || EXTRACT_PROXY, window.location.origin);
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/browser-media`;
     endpoint.search = "";
     endpoint.searchParams.set("sessionId", sessionId);
     endpoint.searchParams.set("url", target);
     if (total && end >= total - 1) endpoint.searchParams.set("close", "1");
-    const response = await fetch(endpoint, {
-      signal: options.signal,
-      headers: { range: `bytes=${start}-${end}` },
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.error || "The source stream could not be downloaded.");
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (!bytes.byteLength) break;
-    chunks.push(bytes);
-    const contentRange = response.headers.get("content-range") || "";
-    const parsedTotal = Number(contentRange.match(/\/(\d+)$/)?.[1] || 0);
-    if (parsedTotal) total = parsedTotal;
-    start += bytes.byteLength;
-    options.onProgress?.(total ? Math.min(1, start / total) : 0);
-    if (!total && bytes.byteLength < chunkSize) break;
-  }
-  options.onProgress?.(1);
-  return new Blob(chunks, { type: format.mimeType });
+    return endpoint;
+  }, {
+    ...options,
+    totalBytes: format.bytes,
+    mimeType: format.mimeType,
+    name: `source.${format.container || "bin"}`,
+    rangeSize: BROWSER_RANGE_SIZE,
+  });
 }
 
 async function downloadFormat(media, format, options = {}) {
@@ -104,15 +244,14 @@ async function downloadFormat(media, format, options = {}) {
   } else {
     const target = format.raw?.url;
     if (!target) throw new Error("That source stream has expired. Inspect the link again.");
-    const endpoint = new URL(EXTRACT_PROXY, window.location.origin);
+    const endpoint = new URL(format.raw?.workerProxy || EXTRACT_PROXY, window.location.origin);
     endpoint.searchParams.set("url", target);
-    const response = await fetch(endpoint, { signal: options.signal });
-    if (!response.ok || !response.body) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.error || "The source stream could not be downloaded.");
-    }
-    stream = response.body;
-    totalBytes = Number(response.headers.get("content-length") || totalBytes || 0);
+    return downloadRanged(() => endpoint, {
+      ...options,
+      totalBytes,
+      mimeType: format.mimeType,
+      name: `source.${format.container || "bin"}`,
+    });
   }
 
   const chunks = await collectStream(stream, totalBytes, options);
@@ -120,8 +259,100 @@ async function downloadFormat(media, format, options = {}) {
   return new Blob(chunks, { type: format.mimeType });
 }
 
+async function muxStreamsHardware(videoBlob, audioBlob, videoFormat, audioFormat, target, {
+  signal,
+  onProgress,
+  onPhase,
+} = {}) {
+  if (typeof VideoDecoder === "undefined" && typeof AudioDecoder === "undefined") {
+    throw new Error("Browser media pipeline unavailable");
+  }
+  const media = await import("mediabunny");
+  const videoInput = new media.Input({ source: new media.BlobSource(videoBlob), formats: media.ALL_FORMATS });
+  const audioInput = new media.Input({ source: new media.BlobSource(audioBlob), formats: media.ALL_FORMATS });
+  const mimeType = mimeForTarget(target);
+  const spool = await createSpool(mimeType);
+  let outputTarget;
+  if (spool.diskBacked) {
+    const writable = new WritableStream({
+      write: (chunk) => spool.write(chunk.data, chunk.position),
+    });
+    outputTarget = new media.StreamTarget(writable, { chunked: true, chunkSize: 16 * 1024 * 1024 });
+  } else {
+    await spool.abort();
+    outputTarget = new media.BufferTarget();
+  }
+  const outputFormat = target === "webm"
+    ? new media.WebMOutputFormat()
+    : new media.Mp4OutputFormat({ fastStart: false });
+  const output = new media.Output({ format: outputFormat, target: outputTarget });
+  let videoConversion;
+  let audioConversion;
+  const cancel = () => {
+    void videoConversion?.cancel();
+    void audioConversion?.cancel();
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    onPhase?.("Combining original streams…");
+    videoConversion = await media.Conversion.init({
+      input: videoInput,
+      output,
+      video: {},
+      audio: { discard: true },
+      tracks: "primary",
+      composable: true,
+      showWarnings: false,
+    });
+    audioConversion = await media.Conversion.init({
+      input: audioInput,
+      output,
+      video: { discard: true },
+      audio: {},
+      tracks: "primary",
+      composable: true,
+      showWarnings: false,
+    });
+    if (!videoConversion.utilizedTracks.length || !audioConversion.utilizedTracks.length) {
+      throw new Error("The browser could not combine these source codecs");
+    }
+    let videoProgress = 0;
+    let audioProgress = 0;
+    const update = () => onProgress?.((videoProgress + audioProgress) / 2);
+    videoConversion.onProgress = (value) => { videoProgress = value; update(); };
+    audioConversion.onProgress = (value) => { audioProgress = value; update(); };
+    await output.start();
+    await Promise.all([videoConversion.execute(), audioConversion.execute()]);
+    throwIfAborted(signal);
+    await output.finalize();
+    if (outputTarget instanceof media.BufferTarget) {
+      if (!outputTarget.buffer) throw new Error("The browser muxer produced no output");
+      return new Blob([outputTarget.buffer], { type: mimeType });
+    }
+    return await spool.finish(`combined.${target}`);
+  } catch (error) {
+    await spool.abort();
+    if (signal?.aborted) throw abortError();
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    videoInput.dispose();
+    audioInput.dispose();
+  }
+}
+
 async function muxStreams(videoBlob, audioBlob, videoFormat, audioFormat, target, { signal, onProgress, onPhase } = {}) {
   throwIfAborted(signal);
+  try {
+    return await muxStreamsHardware(videoBlob, audioBlob, videoFormat, audioFormat, target, {
+      signal,
+      onProgress,
+      onPhase,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    onPhase?.("Using compatibility muxer…");
+  }
   const cancel = () => cancelFFmpeg();
   signal?.addEventListener("abort", cancel, { once: true });
   let ffmpeg;

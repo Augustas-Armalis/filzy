@@ -23,6 +23,14 @@ const LAN_CHUNK = 1024 * 1024; // 1 MB messages on a local link
 const LAN_HIGH_WATER = 64 * 1024 * 1024; // keep up to 64 MB in flight on LAN
 const LAN_LOW_WATER = 8 * 1024 * 1024; // refill early so the local pipe never drains
 const LAN_RTT_MS = 8; // selected-pair RTT below this ⇒ treat as same-network
+// SCTP accepting bytes does not mean the receiver has written them to disk.
+// Keep a second, application-level window so a fast sender cannot overwhelm a
+// slower File System Access writable (the old path commonly stalled on large
+// files after the receiver accumulated several gigabytes of pending writes).
+const RECEIVER_WINDOW = 16 * 1024 * 1024;
+const LAN_RECEIVER_WINDOW = 32 * 1024 * 1024;
+const ACK_EVERY = 2 * 1024 * 1024;
+const ACK_TIMEOUT = 45_000;
 
 function bars(rtt) {
   if (rtt < 40) return 5;
@@ -180,7 +188,17 @@ export class BeamHost {
       status: "reading",
       startedAt: Date.now(),
     };
-    const state = { pc, channel, recipient, lastBytes: 0, lastTime: Date.now() };
+    const state = {
+      pc,
+      channel,
+      recipient,
+      lastBytes: 0,
+      lastTime: Date.now(),
+      acked: new Map(),
+      ackWaiters: new Map(),
+      stored: new Set(),
+      storedWaiters: new Map(),
+    };
     this.peers.set(remoteId, state);
     this.cb.onRecipientJoin?.(recipient);
 
@@ -223,7 +241,15 @@ export class BeamHost {
     if (msg.t === "extract") {
       p.recipient.status = "extracting";
       this.cb.onRecipientUpdate?.(remoteId, { status: "extracting", startedAt: Date.now() });
-      void this.streamTo(remoteId, msg.fileIds);
+      void this.streamTo(remoteId, msg.fileIds).catch((error) => {
+        p.recipient.status = "disconnected";
+        p.recipient.speed = 0;
+        this.cb.onRecipientUpdate?.(remoteId, {
+          status: "disconnected",
+          speed: 0,
+          error: error?.message || "Transfer interrupted",
+        });
+      });
     } else if (msg.t === "progress") {
       const total = this.manifest.totalSize || 1;
       const frac = Math.min(1, msg.received / total);
@@ -247,6 +273,20 @@ export class BeamHost {
         p.recipient.region = msg.region;
         this.cb.onRecipientUpdate?.(remoteId, { region: msg.region });
       }
+    } else if (msg.t === "chunk-ack") {
+      const acknowledged = Math.max(p.acked.get(msg.id) || 0, Number(msg.offset) || 0);
+      p.acked.set(msg.id, acknowledged);
+      this.resolveAckWaiters(p, msg.id, acknowledged);
+    } else if (msg.t === "file-stored") {
+      p.stored.add(msg.id);
+      const waiters = p.storedWaiters.get(msg.id) || [];
+      p.storedWaiters.delete(msg.id);
+      waiters.forEach(({ resolve, timer }) => {
+        clearTimeout(timer);
+        resolve();
+      });
+    } else if (msg.t === "file-error") {
+      this.rejectPeerWaiters(p, msg.id, new Error(msg.error || "The receiving device could not save the file"));
     }
   }
 
@@ -274,6 +314,8 @@ export class BeamHost {
 
     for (const { meta, file } of wanted) {
       if (this.closed) return;
+      p.acked.set(meta.id, 0);
+      p.stored.delete(meta.id);
       this.sendCtrl(channel, { t: "file-begin", id: meta.id, name: meta.name, size: meta.size, mime: meta.mime });
       let offset = 0;
       // Prefetch the next chunk while the current is in flight — overlaps the
@@ -292,9 +334,76 @@ export class BeamHost {
           return;
         }
         offset = nextOffset;
+        const receiverWindow = p.turbo ? LAN_RECEIVER_WINDOW : RECEIVER_WINDOW;
+        const acknowledged = p.acked.get(meta.id) || 0;
+        if (offset - acknowledged >= receiverWindow) {
+          await this.waitForAck(p, meta.id, offset - receiverWindow + 1);
+        }
       }
       this.sendCtrl(channel, { t: "file-end", id: meta.id, hash: meta.hash });
+      // Ordered delivery only guarantees that file-end follows the chunks on
+      // the data channel. It does not wait for asynchronous disk writes.
+      await this.waitForStored(p, meta.id);
     }
+    this.sendCtrl(channel, { t: "transfer-end", fileIds: wanted.map(({ meta }) => meta.id) });
+  }
+
+  resolveAckWaiters(p, fileId, acknowledged) {
+    const waiters = p.ackWaiters.get(fileId) || [];
+    const remaining = [];
+    for (const waiter of waiters) {
+      if (acknowledged >= waiter.minimum) {
+        clearTimeout(waiter.timer);
+        waiter.resolve();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    if (remaining.length) p.ackWaiters.set(fileId, remaining);
+    else p.ackWaiters.delete(fileId);
+  }
+
+  rejectPeerWaiters(p, fileId, error) {
+    for (const waiter of p.ackWaiters.get(fileId) || []) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    for (const waiter of p.storedWaiters.get(fileId) || []) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    p.ackWaiters.delete(fileId);
+    p.storedWaiters.delete(fileId);
+  }
+
+  waitForAck(p, fileId, minimum) {
+    if ((p.acked.get(fileId) || 0) >= minimum) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const waiters = (p.ackWaiters.get(fileId) || []).filter((entry) => entry.resolve !== resolve);
+        if (waiters.length) p.ackWaiters.set(fileId, waiters);
+        else p.ackWaiters.delete(fileId);
+        reject(new Error("The receiving device stopped writing the file"));
+      }, ACK_TIMEOUT);
+      const waiters = p.ackWaiters.get(fileId) || [];
+      waiters.push({ minimum, resolve, reject, timer });
+      p.ackWaiters.set(fileId, waiters);
+    });
+  }
+
+  waitForStored(p, fileId) {
+    if (p.stored.has(fileId)) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const waiters = (p.storedWaiters.get(fileId) || []).filter((entry) => entry.resolve !== resolve);
+        if (waiters.length) p.storedWaiters.set(fileId, waiters);
+        else p.storedWaiters.delete(fileId);
+        reject(new Error("The receiving device did not finish saving the file"));
+      }, ACK_TIMEOUT);
+      const waiters = p.storedWaiters.get(fileId) || [];
+      waiters.push({ resolve, reject, timer });
+      p.storedWaiters.set(fileId, waiters);
+    });
   }
 
   waitDrain(channel) {
@@ -541,6 +650,10 @@ export class BeamReceiver {
     this.sinks.set(fileId, writable);
   }
 
+  clearSink(fileId) {
+    this.sinks.delete(fileId);
+  }
+
   startExtract(fileIds) {
     this.send({ t: "extract", fileIds });
   }
@@ -565,10 +678,18 @@ export class BeamReceiver {
           received: 0,
           chunks: [],
           sink: this.sinks.get(msg.id) || null,
+          writeChain: Promise.resolve(),
+          persisted: 0,
+          lastAck: 0,
+          failed: null,
         };
         this.incoming.set(msg.id, this.current);
       } else if (msg.t === "file-end") {
         void this.finishFile(msg.id, msg.hash);
+      } else if (msg.t === "transfer-end") {
+        this.send({ t: "complete" });
+        this.cb.onAllComplete?.(msg.fileIds || []);
+        this.stopProgressLoop();
       } else if (msg.t === "signal") {
         this.cb.onSignal?.(msg.bars);
       }
@@ -578,18 +699,34 @@ export class BeamReceiver {
     if (!this.current) return;
     const buf = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
     if (!buf) return;
-    this.current.received += buf.byteLength;
-    this.totalReceived += buf.byteLength;
-    if (this.current.sink) {
-      try {
-        this.current.sink.write(buf); // streams to disk; close() flushes on file-end
-      } catch {
-        /* sink closing */
-      }
+    const file = this.current;
+    file.received += buf.byteLength;
+    if (file.sink) {
+      // FileSystemWritableFileStream.write() is asynchronous. Serialize writes
+      // and only acknowledge bytes once the browser has accepted them.
+      file.writeChain = file.writeChain.then(async () => {
+        await file.sink.write(buf);
+        this.markPersisted(file, buf.byteLength);
+      }).catch((error) => {
+        file.failed = error instanceof Error ? error : new Error("Could not write the file");
+        this.send({ t: "file-error", id: file.id, error: file.failed.message });
+        this.cb.onError?.(file.failed);
+      });
     } else {
-      this.current.chunks.push(buf);
+      file.chunks.push(buf);
+      this.markPersisted(file, buf.byteLength);
     }
-    this.cb.onFileProgress?.(this.current.id, this.current.received, this.current.size, this.instSpeed());
+  }
+
+  markPersisted(file, byteLength) {
+    if (file.failed) return;
+    file.persisted += byteLength;
+    this.totalReceived += byteLength;
+    if (file.persisted - file.lastAck >= ACK_EVERY || file.persisted >= file.size) {
+      file.lastAck = file.persisted;
+      this.send({ t: "chunk-ack", id: file.id, offset: file.persisted });
+    }
+    this.cb.onFileProgress?.(file.id, file.persisted, file.size, this.instSpeed());
   }
 
   instSpeed() {
@@ -606,6 +743,8 @@ export class BeamReceiver {
   async finishFile(id, expectedHash) {
     const f = this.incoming.get(id);
     if (!f) return;
+    await f.writeChain;
+    if (f.failed) return;
     if (f.sink) {
       // Streamed straight to disk — flush + close, no Blob in memory.
       try {
@@ -630,19 +769,8 @@ export class BeamReceiver {
       f.chunks = []; // free memory
       this.cb.onFileComplete?.(id, blob, verified);
     }
+    this.send({ t: "file-stored", id });
     this.current = null;
-    // All done?
-    if (this.manifest && this.incoming.size >= this.manifest.files.length) {
-      const allDone = this.manifest.files.every((mf) => {
-        const inc = this.incoming.get(mf.id);
-        return inc && inc.received >= inc.size;
-      });
-      if (allDone) {
-        this.send({ t: "complete" });
-        this.cb.onAllComplete?.();
-        this.stopProgressLoop();
-      }
-    }
   }
 
   // Best-effort geo from a free IP API, shared with the host so it can show

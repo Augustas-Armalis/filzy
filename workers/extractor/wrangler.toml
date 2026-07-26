@@ -1,4 +1,5 @@
 name = "filzy-extractor"
+account_id = "cdf49947efb38da918ed0964ab4e9129"
 main = "src/index.js"
 compatibility_date = "2026-07-15"
 compatibility_flags = ["nodejs_compat"]

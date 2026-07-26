@@ -15,6 +15,7 @@ import {
 } from "./src/content/seoCatalog.js";
 
 const EXTRACT_HOSTS = ["youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "googleusercontent.com"];
+const EXTRACT_WORKER = "https://filzy-extractor.sendfilzy-cdf.workers.dev";
 
 function allowedExtractTarget(value) {
   try {
@@ -36,6 +37,39 @@ function extractorDevProxy() {
     configureServer(server) {
       server.middlewares.use("/api/extract-proxy", async (request, response) => {
         const requestUrl = new URL(request.url || "/", "http://localhost");
+        // Resolver and Browser Rendering routes live in the deployed Worker.
+        // The previous dev middleware treated `/resolve` as a raw media proxy,
+        // so local extraction always failed with “Unsupported extraction
+        // target” even though production worked.
+        if (requestUrl.pathname !== "/") {
+          try {
+            const headers = new Headers();
+            for (const [name, value] of Object.entries(request.headers)) {
+              if (!value || ["host", "content-length"].includes(name.toLowerCase())) continue;
+              headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+            }
+            headers.set("origin", request.headers.origin || "http://127.0.0.1:5173");
+            const upstream = await fetch(`${EXTRACT_WORKER}${requestUrl.pathname}${requestUrl.search}`, {
+              method: request.method || "GET",
+              headers,
+              redirect: "follow",
+            });
+            const safeHeaders = {};
+            for (const name of ["content-type", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"]) {
+              const value = upstream.headers.get(name);
+              if (value) safeHeaders[name] = value;
+            }
+            response.writeHead(upstream.status, safeHeaders);
+            // These Worker routes are bounded (JSON metadata or a 1 MB Browser
+            // Rendering chunk). Buffering them avoids a Node/Connect stream
+            // hand-off that can leave the local response open indefinitely.
+            response.end(Buffer.from(await upstream.arrayBuffer()));
+          } catch (error) {
+            response.writeHead(502, { "content-type": "application/json" });
+            response.end(JSON.stringify({ error: error?.message || "Extractor Worker request failed" }));
+          }
+          return;
+        }
         const target = requestUrl.searchParams.get("url") || "";
         if (!allowedExtractTarget(target)) {
           response.writeHead(400, { "content-type": "application/json" });

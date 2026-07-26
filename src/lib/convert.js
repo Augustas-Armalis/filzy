@@ -155,6 +155,26 @@ function ffmpegArgs(inName, outNm, targetValue, settings = {}) {
       return [...a, ...vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, ...noAudio, ...(settings.mute ? [] : ["-c:a", "aac", "-b:a", "192k"]), outNm];
     case "avi":
       return [...a, ...vf, "-c:v", "mpeg4", "-q:v", settings.quality === "best" ? "2" : settings.quality === "small" ? "7" : "4", ...noAudio, ...(settings.mute ? [] : ["-c:a", "libmp3lame", "-b:a", "192k"]), outNm];
+    case "3gp":
+    case "3g2":
+      return [...a, ...vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, ...noAudio, ...(settings.mute ? [] : ["-c:a", "aac", "-b:a", "128k"]), "-movflags", "+faststart", outNm];
+    case "flv":
+      return [...a, ...vf, "-c:v", "flv", "-q:v", settings.quality === "best" ? "3" : settings.quality === "small" ? "9" : "6", ...noAudio, ...(settings.mute ? [] : ["-c:a", "libmp3lame", "-b:a", "128k"]), outNm];
+    case "m4v":
+      return [...a, ...vf, "-an", "-c:v", "mpeg4", "-q:v", settings.quality === "best" ? "2" : settings.quality === "small" ? "7" : "4", outNm];
+    case "mpeg":
+    case "mpg":
+      return [...a, ...vf, "-c:v", "mpeg2video", "-q:v", settings.quality === "best" ? "2" : settings.quality === "small" ? "7" : "4", ...noAudio, ...(settings.mute ? [] : ["-c:a", "mp2", "-b:a", "192k"]), outNm];
+    case "ogv":
+      return [...a, ...vf, "-c:v", "libtheora", "-q:v", settings.quality === "best" ? "9" : settings.quality === "small" ? "4" : "7", ...noAudio, ...(settings.mute ? [] : ["-c:a", "libvorbis", "-q:a", "5"]), outNm];
+    case "ts":
+      return [...a, ...vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, ...noAudio, ...(settings.mute ? [] : ["-c:a", "aac", "-b:a", "192k"]), "-f", "mpegts", outNm];
+    case "m2ts":
+      return [...a, ...vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, ...noAudio, ...(settings.mute ? [] : ["-c:a", "aac", "-b:a", "192k"]), "-mpegts_m2ts_mode", "1", "-f", "mpegts", outNm];
+    case "vob":
+      return [...a, ...vf, "-c:v", "mpeg2video", "-q:v", settings.quality === "best" ? "2" : settings.quality === "small" ? "7" : "4", ...noAudio, ...(settings.mute ? [] : ["-c:a", "ac3", "-b:a", "192k"]), "-f", "vob", outNm];
+    case "wmv":
+      return [...a, ...vf, "-c:v", "wmv2", "-q:v", settings.quality === "best" ? "2" : settings.quality === "small" ? "7" : "4", ...noAudio, ...(settings.mute ? [] : ["-c:a", "wmav2", "-b:a", "192k"]), outNm];
     case "gif":
       return [...a, "-vf", `fps=${settings.fps || 12},scale=${settings.width || 480}:-1:flags=lanczos`, "-loop", settings.loop === false ? "-1" : "0", outNm];
     case "mp3":
@@ -162,14 +182,30 @@ function ffmpegArgs(inName, outNm, targetValue, settings = {}) {
     case "wav":
       return [...a, "-vn", "-c:a", "pcm_s16le", ...(settings.sampleRate && settings.sampleRate !== "auto" ? ["-ar", String(settings.sampleRate)] : []), ...(settings.mono ? ["-ac", "1"] : []), outNm];
     case "m4a":
+    case "m4b":
     case "aac":
       return [...a, "-vn", "-c:a", "aac", ...audioArgs(settings), outNm];
     case "ogg":
+    case "oga":
       return [...a, "-vn", "-c:a", "libvorbis", ...audioArgs(settings), outNm];
     case "opus":
       return [...a, "-vn", "-c:a", "libopus", ...audioArgs(settings), outNm];
+    case "weba":
+      return [...a, "-vn", "-c:a", "libopus", ...audioArgs(settings), "-f", "webm", outNm];
     case "flac":
       return [...a, "-vn", "-c:a", "flac", ...(settings.sampleRate && settings.sampleRate !== "auto" ? ["-ar", String(settings.sampleRate)] : []), ...(settings.mono ? ["-ac", "1"] : []), outNm];
+    case "ac3":
+      return [...a, "-vn", "-c:a", "ac3", ...audioArgs(settings), outNm];
+    case "aiff":
+    case "aif":
+    case "aifc":
+      return [...a, "-vn", "-c:a", "pcm_s16be", ...(settings.sampleRate && settings.sampleRate !== "auto" ? ["-ar", String(settings.sampleRate)] : []), ...(settings.mono ? ["-ac", "1"] : []), "-f", "aiff", outNm];
+    case "au":
+      return [...a, "-vn", "-c:a", "pcm_s16be", ...(settings.sampleRate && settings.sampleRate !== "auto" ? ["-ar", String(settings.sampleRate)] : []), ...(settings.mono ? ["-ac", "1"] : []), outNm];
+    case "caf":
+      return [...a, "-vn", "-c:a", "pcm_s16le", ...(settings.sampleRate && settings.sampleRate !== "auto" ? ["-ar", String(settings.sampleRate)] : []), ...(settings.mono ? ["-ac", "1"] : []), outNm];
+    case "wma":
+      return [...a, "-vn", "-c:a", "wmav2", ...audioArgs(settings), outNm];
     // exotic image formats through ffmpeg
     default:
       return [...a, ...vf, outNm];
@@ -201,6 +237,73 @@ async function ffmpegConvert(file, targetValue, { onStatus, onProgress, signal, 
     signal?.removeEventListener("abort", cancel);
     await ffmpeg?.deleteFile(inName).catch(() => {});
     await ffmpeg?.deleteFile(outNm).catch(() => {});
+  }
+}
+
+const HARDWARE_VIDEO_OUTPUTS = new Set(["mp4", "mov", "webm", "mkv", "ts"]);
+
+async function hardwareVideoConvert(file, targetValue, { onStatus, onProgress, signal, ...settings } = {}) {
+  if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+    throw new Error("Hardware codecs are unavailable");
+  }
+  const media = await import("mediabunny");
+  const outputFormats = {
+    mp4: () => new media.Mp4OutputFormat({ fastStart: false }),
+    mov: () => new media.MovOutputFormat({ fastStart: false }),
+    webm: () => new media.WebMOutputFormat(),
+    mkv: () => new media.MkvOutputFormat(),
+    ts: () => new media.MpegTsOutputFormat(),
+  };
+  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const target = new media.BufferTarget();
+  const output = new media.Output({ format: outputFormats[targetValue](), target });
+  const webmFamily = targetValue === "webm" || targetValue === "mkv";
+  const quality = settings.quality === "best"
+    ? media.QUALITY_HIGH
+    : settings.quality === "small"
+      ? media.QUALITY_LOW
+      : media.QUALITY_MEDIUM;
+  let conversion = null;
+  const cancel = () => void conversion?.cancel();
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    throwIfAborted(signal);
+    onStatus?.("Converting with hardware acceleration…");
+    conversion = await media.Conversion.init({
+      input,
+      output,
+      tracks: "primary",
+      video: {
+        codec: webmFamily ? "vp9" : "avc",
+        bitrate: quality,
+        ...(settings.resolution && settings.resolution !== "original" ? { height: Number(settings.resolution) } : {}),
+        ...(settings.fps && settings.fps !== "original" ? { frameRate: Number(settings.fps) } : {}),
+        hardwareAcceleration: "prefer-hardware",
+        keyFrameInterval: 5,
+      },
+      audio: settings.mute
+        ? { discard: true }
+        : { codec: webmFamily ? "opus" : "aac", bitrate: 192_000 },
+      showWarnings: false,
+    });
+    if (!conversion.isValid) throw new Error("This source codec needs the compatibility engine");
+    conversion.onProgress = (progress) => onProgress?.(Math.max(0, Math.min(0.99, progress)));
+    await conversion.execute();
+    throwIfAborted(signal);
+    if (!target.buffer) throw new Error("The hardware converter produced no output");
+    onProgress?.(1);
+    onStatus?.("");
+    return {
+      blob: new Blob([target.buffer], { type: formatByValue(targetValue)?.mime || output.format.mimeType }),
+      name: outName(file, targetValue),
+      hardwareAccelerated: true,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw abortError();
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    input.dispose();
   }
 }
 
@@ -262,6 +365,18 @@ export async function convertFile(file, targetValue, opts = {}) {
       // (AVIF is the common case). Fall through to ffmpeg instead of producing
       // mislabeled bytes.
       if (error?.name === "AbortError") throw error;
+    }
+  }
+
+  // Browser-native codecs use the device's video hardware and are dramatically
+  // faster than CPU-only FFmpeg WebAssembly. Unsupported source codecs still
+  // fall back to the broad compatibility engine below.
+  if (categoryOf(file) === "video" && HARDWARE_VIDEO_OUTPUTS.has(targetValue)) {
+    try {
+      return await hardwareVideoConvert(file, targetValue, opts);
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      opts.onStatus?.("Using compatibility engine…");
     }
   }
 
