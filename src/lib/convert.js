@@ -1,5 +1,5 @@
 import { formatByValue, detectFormat, extOf, sourceValueOf, normalizeFormatValue, categoryOf, CANVAS_OUTPUTS, CANVAS_INPUTS } from "@/lib/formats";
-import { loadFFmpeg, cancelFFmpeg, onFFmpegProgress, fileToUint8 } from "@/lib/ffmpeg";
+import { loadFFmpeg, cancelFFmpeg, onFFmpegProgress, fileToUint8, ffmpegFailureMessage } from "@/lib/ffmpeg";
 import { traceImageToSvg } from "@/lib/svgTrace";
 import { convertTextFile, isTextConversion } from "@/lib/textConvert";
 import { imageToPdf } from "@/lib/pdfConvert";
@@ -226,13 +226,24 @@ async function ffmpegConvert(file, targetValue, { onStatus, onProgress, signal, 
     await ffmpeg.writeFile(inName, await fileToUint8(file));
     throwIfAborted(signal);
     onStatus?.("Converting…");
-    await ffmpeg.exec(ffmpegArgs(inName, outNm, targetValue, settings));
+    const exitCode = await ffmpeg.exec(ffmpegArgs(inName, outNm, targetValue, settings));
+    if (exitCode !== 0) throw new Error(ffmpegFailureMessage(`Could not create ${targetValue.toUpperCase()}`));
     throwIfAborted(signal);
-    const data = await ffmpeg.readFile(outNm);
+    let data;
+    try {
+      data = await ffmpeg.readFile(outNm);
+    } catch (error) {
+      const detail = typeof error === "string" ? error : error?.message;
+      throw new Error(detail || ffmpegFailureMessage(`Could not read the ${targetValue.toUpperCase()} output`));
+    }
     const mime = formatByValue(targetValue)?.mime || "application/octet-stream";
     const blob = new Blob([data.buffer], { type: mime });
     onStatus?.("");
     return { blob, name: outNm };
+  } catch (error) {
+    if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+    const detail = typeof error === "string" ? error : error?.message;
+    throw new Error(detail || ffmpegFailureMessage(`Could not create ${targetValue.toUpperCase()}`));
   } finally {
     signal?.removeEventListener("abort", cancel);
     await ffmpeg?.deleteFile(inName).catch(() => {});
@@ -274,11 +285,17 @@ async function hardwareVideoConvert(file, targetValue, { onStatus, onProgress, s
       output,
       tracks: "primary",
       video: {
-        codec: webmFamily ? "vp9" : "avc",
+        // VP8 is available through WebCodecs on substantially more browsers
+        // and devices than VP9 encoding. It keeps WebM/MKV conversion on the
+        // fast local path instead of needlessly loading the WASM engine.
+        codec: webmFamily ? "vp8" : "avc",
         bitrate: quality,
         ...(settings.resolution && settings.resolution !== "original" ? { height: Number(settings.resolution) } : {}),
         ...(settings.fps && settings.fps !== "original" ? { frameRate: Number(settings.fps) } : {}),
-        hardwareAcceleration: "prefer-hardware",
+        // Chrome commonly exposes VP8 only through its optimized software
+        // encoder. Requiring a hardware implementation incorrectly marks the
+        // otherwise supported WebM path as unavailable.
+        hardwareAcceleration: webmFamily ? "no-preference" : "prefer-hardware",
         keyFrameInterval: 5,
       },
       audio: settings.mute

@@ -14,6 +14,7 @@
   "dependencies": {
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
+    "bgutils-js": "^4.0.2",
     "clsx": "^2.1.1",
     "framer-motion": "^12.41.0",
     "imagetracerjs": "^1.2.6",
@@ -26,7 +27,8 @@
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.0",
     "tailwind-merge": "^3.6.0",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "youtubei.js": "^17.2.0"
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "^1.1.0",

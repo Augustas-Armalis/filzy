@@ -246,6 +246,7 @@ async function downloadFormat(media, format, options = {}) {
     if (!target) throw new Error("That source stream has expired. Inspect the link again.");
     const endpoint = new URL(format.raw?.workerProxy || EXTRACT_PROXY, window.location.origin);
     endpoint.searchParams.set("url", target);
+    if (format.raw?.sourceUrl) endpoint.searchParams.set("source", format.raw.sourceUrl);
     return downloadRanged(() => endpoint, {
       ...options,
       totalBytes,

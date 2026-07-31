@@ -4,9 +4,12 @@ const TARGET_HOSTS = [
   "youtube.com",
   "youtu.be",
   "youtubei.googleapis.com",
+  "jnn-pa.googleapis.com",
+  "www.google.com",
   "googlevideo.com",
   "ytimg.com",
   "ggpht.com",
+  "gstatic.com",
   "googleusercontent.com",
   "piped.private.coffee",
   "kavin.rocks",
@@ -14,6 +17,7 @@ const TARGET_HOSTS = [
   "tiktokcdn-us.com",
   "tiktokcdn-eu.com",
   "tiktokv.com",
+  "webapp-prime.tiktok.com",
   "byteoversea.com",
   "ibytedtos.com",
   "muscdn.com",
@@ -23,7 +27,7 @@ const TARGET_HOSTS = [
   "eepy.today",
 ];
 const SOCIAL_SOURCE_HOSTS = ["tiktok.com", "instagram.com", "facebook.com", "fb.watch"];
-const REQUEST_HEADERS = new Set(["accept", "accept-language", "content-type", "range", "user-agent", "x-origin"]);
+const REQUEST_HEADERS = new Set(["accept", "accept-language", "content-type", "range", "user-agent", "x-origin", "x-user-agent"]);
 const RESPONSE_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"];
 const QUALITY_PRIORITY = ["highres", "hd2160", "hd1440", "hd1080", "hd720", "large", "medium", "small", "tiny"];
 const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks"];
@@ -31,11 +35,14 @@ const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.
 function allowedTarget(value) {
   try {
     const target = new URL(value);
+    const platformMediaRoute = (target.hostname === "www.tiktok.com" || target.hostname === "tiktok.com")
+      && target.pathname.startsWith("/aweme/v1/play/");
+    const platformCdnRoute = target.hostname.endsWith(".tiktok.com") && target.pathname.startsWith("/video/");
     return target.protocol === "https:"
       && !target.username
       && !target.password
       && (!target.port || target.port === "443")
-      && TARGET_HOSTS.some((domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`));
+      && (platformMediaRoute || platformCdnRoute || TARGET_HOSTS.some((domain) => target.hostname === domain || target.hostname.endsWith(`.${domain}`)));
   } catch {
     return false;
   }
@@ -51,7 +58,7 @@ function allowedOrigin(request, env) {
 function corsHeaders(origin) {
   const headers = new Headers({
     "access-control-allow-methods": "GET, HEAD, POST, OPTIONS",
-    "access-control-allow-headers": "Accept, Accept-Language, Content-Type, Range, X-Goog-Visitor-Id, X-Origin, X-Youtube-Client-Name, X-Youtube-Client-Version",
+    "access-control-allow-headers": "Accept, Accept-Language, Content-Type, Range, X-Goog-Api-Key, X-Goog-Visitor-Id, X-Origin, X-User-Agent, X-Youtube-Client-Name, X-Youtube-Client-Version",
     "access-control-expose-headers": "Content-Length, Content-Range, Accept-Ranges, Content-Type",
     "access-control-max-age": "86400",
     "vary": "Origin",
@@ -70,6 +77,12 @@ function json(data, status, origin) {
 function cleanMediaUrl(value) {
   const url = new URL(value);
   for (const key of ["range", "rn", "rbuf"]) url.searchParams.delete(key);
+  return url.toString();
+}
+
+function cleanSocialMediaUrl(value) {
+  const url = new URL(value);
+  for (const key of ["bytestart", "byteend", "start", "end"]) url.searchParams.delete(key);
   return url.toString();
 }
 
@@ -131,13 +144,13 @@ const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 const INNERTUBE_CLIENTS = [
   {
     name: "ANDROID_VR",
-    ua: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; en_US) gzip",
-    context: { clientName: "ANDROID_VR", clientVersion: "1.60.19", deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L", hl: "en", gl: "US" },
+    ua: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    context: { clientName: "ANDROID_VR", clientVersion: "1.65.10", deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L", hl: "en", gl: "US" },
   },
   {
     name: "IOS",
-    ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)",
-    context: { clientName: "IOS", clientVersion: "20.10.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82", hl: "en", gl: "US" },
+    ua: "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+    context: { clientName: "IOS", clientVersion: "21.26.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82", hl: "en", gl: "US" },
   },
 ];
 
@@ -279,10 +292,11 @@ async function resolveWithBrowser(env, videoId) {
 
   try {
     await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36");
+    await page.setExtraHTTPHeaders({ "accept-language": "en-US,en;q=0.9" });
     await page.evaluateOnNewDocument(() => {
-      // Keep MediaSource available, but make YouTube use its main-thread media
-      // pipeline so the page CDP session can observe the signed byte requests.
-      Object.defineProperty(globalThis, "Worker", { configurable: true, value: undefined });
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
     });
     await page.setCookie({
       name: "CONSENT",
@@ -319,6 +333,10 @@ async function resolveWithBrowser(env, videoId) {
     browser.on("targetcreated", attachMediaTarget);
     for (const target of browser.targets()) attachMediaTarget(target);
     page.on("request", (event) => capture(event.url()));
+    page.on("response", (event) => {
+      const contentType = event.headers()?.["content-type"] || "";
+      if (/^(audio|video)\//i.test(contentType)) capture(event.url());
+    });
     try {
       cdp = await page.target().createCDPSession();
       await cdp.send("Network.enable");
@@ -330,7 +348,7 @@ async function resolveWithBrowser(env, videoId) {
       cdp = null;
     }
 
-    await page.goto(`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1`, {
+    await page.goto(`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1&origin=https%3A%2F%2Ffilzy.site&hl=en`, {
       waitUntil: "domcontentloaded",
       timeout: 15_000,
     });
@@ -345,7 +363,7 @@ async function resolveWithBrowser(env, videoId) {
     });
     let playerResponse = JSON.parse(playerResponseText || "null");
     if (playerResponse?.playabilityStatus?.status !== "OK") {
-      await page.goto(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+      await page.goto(`https://www.youtube.com/watch?v=${videoId}&hl=en&autoplay=1`, {
         waitUntil: "domcontentloaded",
         timeout: 15_000,
       });
@@ -361,6 +379,51 @@ async function resolveWithBrowser(env, videoId) {
     }
     if (playerResponse?.playabilityStatus?.status !== "OK") {
       throw new Error(playerResponse?.playabilityStatus?.reason || "YouTube did not return a playable source");
+    }
+
+    // Browser Rendering enforces Chromium's autoplay policy. A JavaScript
+    // `playVideo()` call alone can leave an otherwise playable embed in the
+    // unstarted state, so give the player one trusted click before requesting
+    // the quality ladder. This is equivalent to the user pressing Play.
+    await page.bringToFront().catch(() => {});
+    await page.click(".ytp-large-play-button").catch(() => {});
+    await page.evaluate(async (sourceId) => {
+      const player = document.getElementById("movie_player");
+      player?.mute?.();
+      player?.loadVideoById?.(sourceId, 0, "tiny");
+      player?.playVideo?.();
+      document.querySelector("video")?.click?.();
+    }, videoId);
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    const embedState = await page.evaluate(() => ({
+      playerState: document.getElementById("movie_player")?.getPlayerState?.(),
+      videoReadyState: document.querySelector("video")?.readyState,
+    }));
+    if (embedState.playerState === -1 && !embedState.videoReadyState) {
+      await page.goto(`https://www.youtube.com/watch?v=${videoId}&hl=en&autoplay=1`, {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+      await page.waitForSelector("#movie_player", { timeout: 10_000 });
+      playerResponseText = await page.evaluate(() => {
+        const response = document.getElementById("movie_player")?.getPlayerResponse?.()
+          || globalThis.ytInitialPlayerResponse
+          || globalThis.ytplayer?.config?.args?.raw_player_response
+          || null;
+        return typeof response === "string" ? response : JSON.stringify(response);
+      });
+      playerResponse = JSON.parse(playerResponseText || "null");
+      if (playerResponse?.playabilityStatus?.status !== "OK") {
+        throw new Error(playerResponse?.playabilityStatus?.reason || "YouTube did not return a playable source");
+      }
+      await page.click(".ytp-large-play-button").catch(() => {});
+      await page.evaluate(() => {
+        const player = document.getElementById("movie_player");
+        player?.mute?.();
+        player?.playVideo?.();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
 
     const levelsText = await page.evaluate(async () => {
@@ -379,10 +442,11 @@ async function resolveWithBrowser(env, videoId) {
     const availableLevels = JSON.parse(levelsText || "[]");
     const levels = QUALITY_PRIORITY.filter((quality) => availableLevels.includes(quality)).slice(0, 5);
     for (const [index, quality] of (levels.length ? levels : ["highres"]).entries()) {
-      await page.evaluate(async ({ level, seekTo }) => {
+      await page.evaluate(async ({ level, seekTo, sourceId }) => {
         const player = document.getElementById("movie_player");
         player?.setPlaybackQualityRange?.(level, level);
         player?.setPlaybackQuality?.(level);
+        player?.loadVideoById?.({ videoId: sourceId, startSeconds: seekTo, suggestedQuality: level });
         player?.seekTo?.(seekTo, true);
         player?.playVideo?.();
         const video = document.querySelector("video");
@@ -390,10 +454,14 @@ async function resolveWithBrowser(env, videoId) {
           video.muted = true;
           await video.play().catch(() => {});
         }
-      }, { level: quality, seekTo: Math.min(10 + index * 18, Math.max(1, Number(playerResponse.videoDetails?.lengthSeconds || 20) - 2)) });
-      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      }, {
+        level: quality,
+        sourceId: videoId,
+        seekTo: Math.min(10 + index * 18, Math.max(1, Number(playerResponse.videoDetails?.lengthSeconds || 20) - 2)),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2_400));
     }
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await new Promise((resolve) => setTimeout(resolve, 1_800));
     await Promise.allSettled([...childAttachTasks]);
 
     const performanceUrls = JSON.parse(await page.evaluate(() => JSON.stringify(
@@ -485,14 +553,11 @@ function allowedSocialSource(value) {
   }
 }
 
-// Free, browser-free social resolution. TikTok goes through tikwm (returns a
-// no-watermark MP4 + audio on tiktokcdn, which we can proxy). Instagram and
-// Facebook are best-effort through a public cobalt instance, which tunnels the
-// media file; they can fail if the instance is blocked upstream, in which case
-// the caller falls back to the browser resolver.
-const COBALT_INSTANCES = ["https://co.eepy.today/"];
+// Prefer source pages and signed media URLs exposed by the platforms
+// themselves. Browser playback is the fallback for media-source/blob players.
 
 function directSocialFormats(videoUrl, audioUrl, meta = {}) {
+  const sourceMeta = meta.sourceUrl ? { sourceUrl: meta.sourceUrl } : {};
   return [
     {
       itag: 1000,
@@ -508,6 +573,7 @@ function directSocialFormats(videoUrl, audioUrl, meta = {}) {
       audioChannels: 2,
       hasVideo: true,
       hasAudio: true,
+      ...sourceMeta,
     },
     {
       itag: 1001,
@@ -518,8 +584,91 @@ function directSocialFormats(videoUrl, audioUrl, meta = {}) {
       hasVideo: false,
       hasAudio: true,
       derivedFromVideo: true,
+      ...sourceMeta,
     },
   ];
+}
+
+function decodeHtmlText(value) {
+  return String(value || "")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#34;", '"')
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function tikTokVideoCandidates(item) {
+  const video = item?.video || {};
+  const candidates = [];
+  const add = (url, meta = {}) => {
+    if (!url || !allowedTarget(url) || candidates.some((entry) => entry.url === url)) return;
+    candidates.push({ url, ...meta });
+  };
+  for (const variant of video.bitrateInfo || []) {
+    const address = variant?.PlayAddr || variant?.playAddr || {};
+    const urls = address.UrlList || address.urlList || [];
+    for (const url of urls) {
+      add(url, {
+        width: Number(address.Width || address.width || video.width || 0),
+        height: Number(address.Height || address.height || video.height || 0),
+        fps: Number(variant.BitrateFPS || variant.bitrateFPS || 0),
+        bitrate: Number(variant.Bitrate || variant.bitrate || 0),
+        codec: String(variant.CodecType || variant.codecType || ""),
+      });
+    }
+  }
+  const primary = video.PlayAddrStruct || video.playAddrStruct || {};
+  for (const url of primary.UrlList || primary.urlList || []) {
+    add(url, {
+      width: Number(primary.Width || primary.width || video.width || 0),
+      height: Number(primary.Height || primary.height || video.height || 0),
+      bitrate: Number(video.bitrate || 0),
+      codec: String(video.codecType || ""),
+    });
+  }
+  add(video.playAddr, {
+    width: Number(video.width || 0),
+    height: Number(video.height || 0),
+    bitrate: Number(video.bitrate || 0),
+    codec: String(video.codecType || ""),
+  });
+  return candidates.sort((a, b) => {
+    const aUrl = new URL(a.url);
+    const bUrl = new URL(b.url);
+    const aDirect = aUrl.pathname.startsWith("/video/") || !aUrl.hostname.endsWith("tiktok.com") ? 1 : 0;
+    const bDirect = bUrl.pathname.startsWith("/video/") || !bUrl.hostname.endsWith("tiktok.com") ? 1 : 0;
+    const aCompatibility = /h264|avc/i.test(a.codec) ? 1 : 0;
+    const bCompatibility = /h264|avc/i.test(b.codec) ? 1 : 0;
+    return bDirect - aDirect || bCompatibility - aCompatibility || b.height - a.height || b.bitrate - a.bitrate;
+  });
+}
+
+async function resolveViaTikTokPage(target) {
+  const response = await fetch(target, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "accept-language": "en-US,en;q=0.9",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/136 Safari/537.36",
+    },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) throw new Error(`TikTok returned ${response.status}`);
+  const html = await response.text();
+  const match = html.match(/<script[^>]+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!match) throw new Error("TikTok did not return public video metadata");
+  const payload = JSON.parse(decodeHtmlText(match[1]));
+  const item = payload?.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo?.itemStruct;
+  const candidates = tikTokVideoCandidates(item);
+  if (!item || !candidates.length) throw new Error("TikTok did not expose a downloadable video");
+  const source = candidates[0];
+  return {
+    title: item.desc || "TikTok video",
+    author: item.author?.nickname || item.author?.uniqueId || "TikTok",
+    durationSeconds: Number(item.video?.duration || item.music?.duration || 0),
+    thumbnail: item.video?.cover || item.video?.originCover || "",
+    formats: directSocialFormats(source.url, source.url, { ...source, sourceUrl: target }),
+  };
 }
 
 async function resolveViaTikwm(target) {
@@ -543,56 +692,23 @@ async function resolveViaTikwm(target) {
   };
 }
 
-async function resolveViaCobalt(target) {
-  let lastError;
-  for (const base of COBALT_INSTANCES) {
-    try {
-      const response = await fetch(base, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json", "user-agent": "Mozilla/5.0" },
-        body: JSON.stringify({ url: target, videoQuality: "max", filenameStyle: "basic" }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const data = await response.json();
-      let mediaUrl = ["tunnel", "redirect"].includes(data?.status) ? data.url : null;
-      if (!mediaUrl && data?.status === "picker" && Array.isArray(data.picker)) {
-        mediaUrl = (data.picker.find((item) => item.type === "video") || data.picker[0])?.url || null;
-      }
-      if (mediaUrl && allowedTarget(mediaUrl)) return { url: mediaUrl, filename: data.filename };
-      throw new Error(data?.error?.code || `cobalt status ${data?.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError || new Error("cobalt resolution failed");
-}
-
-function socialHandle(target) {
-  try {
-    const match = new URL(target).pathname.match(/@([\w.]+)/);
-    return match ? `@${match[1]}` : "";
-  } catch {
-    return "";
-  }
-}
-
 async function resolveSocialDirect(target) {
   const host = new URL(target).hostname;
   const isTikTok = host === "tiktok.com" || host.endsWith(".tiktok.com");
   const platform = isTikTok ? "TikTok" : host.endsWith("instagram.com") ? "Instagram" : "Facebook";
-  const handle = socialHandle(target);
-  const label = handle ? `${platform} · ${handle}` : `${platform} video`;
 
   if (isTikTok) {
     try {
-      return await resolveViaTikwm(target);
-    } catch (tikwmError) {
-      const cobalt = await resolveViaCobalt(target).catch(() => { throw tikwmError; });
-      return { title: label, author: handle || "TikTok", durationSeconds: 0, thumbnail: "", formats: directSocialFormats(cobalt.url, cobalt.url) };
+      return await resolveViaTikTokPage(target);
+    } catch (pageError) {
+      try {
+        return await resolveViaTikwm(target);
+      } catch {
+        throw pageError;
+      }
     }
   }
-  const cobalt = await resolveViaCobalt(target);
-  return { title: label, author: handle || platform, durationSeconds: 0, thumbnail: "", formats: directSocialFormats(cobalt.url, cobalt.url) };
+  throw new Error(`${platform} requires browser playback resolution`);
 }
 
 async function resolveSocialWithBrowser(env, target) {
@@ -601,26 +717,74 @@ async function resolveSocialWithBrowser(env, target) {
   const page = await browser.newPage();
   await Promise.all(existingPages.map((existing) => existing.close().catch(() => {})));
   const mediaRequests = [];
-  let keepSession = false;
+  const typedMedia = [];
+  const childSessions = [];
+  const childAttachTasks = new Set();
+  let cdp;
+  let attachMediaTarget = () => {};
   try {
-    const sourceUrl = new URL(target);
-    const tiktokId = sourceUrl.hostname.endsWith("tiktok.com") ? sourceUrl.pathname.match(/\/video\/(\d+)/)?.[1] : null;
-    const navigationTarget = tiktokId
-      ? `https://www.tiktok.com/player/v1/${tiktokId}?autoplay=1&loop=0&description=1`
+    const sourceHost = new URL(target).hostname;
+    const navigationTarget = sourceHost === "facebook.com" || sourceHost.endsWith(".facebook.com") || sourceHost === "fb.watch"
+      ? `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(target)}&show_text=false&autoplay=true&width=1280`
       : target;
     await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    const captureRequest = (value) => {
+      if (!allowedTarget(value)) return;
+      if (/mime_type=(?:video|audio)|\.mp4(?:[?&]|$)|\/video\/|\/audio\/|\/aweme\/v1\/play\//i.test(value)) {
+        mediaRequests.push(cleanSocialMediaUrl(value));
+      }
+    };
+    const captureResponse = (value, contentType) => {
+      if (!allowedTarget(value) || !/^(?:video|audio)\//i.test(contentType || "")) return;
+      typedMedia.push({ url: cleanSocialMediaUrl(value), contentType });
+    };
     page.on("request", (request) => {
       try {
         const value = request.url();
-        if (request.resourceType() === "media" && allowedTarget(value)) mediaRequests.push(value);
+        if (request.resourceType() === "media" && allowedTarget(value)) mediaRequests.push(cleanSocialMediaUrl(value));
+        captureRequest(value);
       } catch {
         // Ignore non-media requests.
       }
     });
+    page.on("response", (response) => {
+      try {
+        const value = response.url();
+        const contentType = response.headers()?.["content-type"] || "";
+        if (allowedTarget(value) && /^(?:video|audio)\//i.test(contentType)) {
+          typedMedia.push({ url: cleanSocialMediaUrl(value), contentType });
+        }
+      } catch {
+        // Ignore responses that disappeared with a navigation.
+      }
+    });
+    const observeSession = async (session) => {
+      childSessions.push(session);
+      await session.send("Network.enable");
+      session.on("Network.requestWillBeSent", (event) => captureRequest(event.request?.url));
+      session.on("Network.responseReceived", (event) => captureResponse(event.response?.url, event.response?.mimeType));
+    };
+    try {
+      cdp = await page.target().createCDPSession();
+      await observeSession(cdp);
+    } catch {
+      cdp = null;
+    }
+    attachMediaTarget = (target) => {
+      if (!["worker", "service_worker", "shared_worker"].includes(target.type?.())) return;
+      const task = target.createCDPSession()
+        .then((session) => observeSession(session))
+        .catch(() => {});
+      childAttachTasks.add(task);
+      task.finally(() => childAttachTasks.delete(task));
+    };
+    browser.on("targetcreated", attachMediaTarget);
+    for (const browserTarget of browser.targets()) attachMediaTarget(browserTarget);
     await page.goto(navigationTarget, { waitUntil: "domcontentloaded", timeout: 20_000 });
-    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
     const data = await page.evaluate(async () => {
-      const video = document.querySelector("video");
+      const videos = [...document.querySelectorAll("video")];
+      const video = videos.find((entry) => entry.readyState >= 2) || videos[0];
       if (video) {
         video.muted = true;
         await video.play().catch(() => {});
@@ -630,16 +794,26 @@ async function resolveSocialWithBrowser(env, target) {
       const hydration = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__")?.textContent;
       if (hydration) {
         try {
-          const data = JSON.parse(hydration);
-          const item = data?.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo?.itemStruct;
-          for (const value of [item?.video?.playAddr, item?.video?.downloadAddr]) if (value) embeddedUrls.push(value);
+          const payload = JSON.parse(hydration);
+          const item = payload?.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo?.itemStruct;
+          const videoData = item?.video || {};
+          for (const value of [videoData.playAddr, videoData.downloadAddr, item?.music?.playUrl]) {
+            if (value) embeddedUrls.push(value);
+          }
+          for (const value of videoData.PlayAddrStruct?.UrlList || []) embeddedUrls.push(value);
+          for (const variant of videoData.bitrateInfo || []) {
+            for (const value of variant?.PlayAddr?.UrlList || []) embeddedUrls.push(value);
+          }
         } catch {
           // Fall through to the narrowly scoped serialized-URL patterns.
         }
       }
       const html = document.documentElement.innerHTML;
       for (const pattern of [
+        /\"browser_native_hd_url\"\s*:\s*\"(https:[^\"]+)\"/g,
+        /\"browser_native_sd_url\"\s*:\s*\"(https:[^\"]+)\"/g,
         /\"(?:playAddr|downloadAddr|video_url|playable_url|playable_url_quality_hd|contentUrl)\"\s*:\s*\"(https:[^\"]+)\"/g,
+        /\"base_url\"\s*:\s*\"(https:[^\"]+\.mp4[^\"]*)\"/g,
       ]) {
         for (const match of html.matchAll(pattern)) {
           embeddedUrls.push(match[1]
@@ -662,12 +836,22 @@ async function resolveSocialWithBrowser(env, target) {
         embeddedUrls,
       };
     });
-    const candidate = [data.currentSrc, data.ogVideo, ...data.embeddedUrls, ...mediaRequests]
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await Promise.allSettled([...childAttachTasks]);
+    const responseVideo = typedMedia.find((entry) => /^video\//i.test(entry.contentType));
+    const responseAudio = typedMedia.find((entry) => /^audio\//i.test(entry.contentType));
+    const looksLikeVideo = (value) => /mime_type=video|video_(?:mp4|webm)|\.mp4(?:[?&]|$)|\/video\/|\/aweme\/v1\/play\//i.test(value || "");
+    const embeddedVideo = data.embeddedUrls.find(looksLikeVideo);
+    const requestedVideo = mediaRequests.find(looksLikeVideo);
+    // Prefer the page's explicitly published HD/base URL over `currentSrc`.
+    // Social players often start with a tiny preview rendition and upgrade a
+    // moment later; choosing currentSrc first silently returned that preview.
+    const candidates = [embeddedVideo, data.ogVideo, responseVideo?.url, data.currentSrc, requestedVideo]
+      .map((value) => value && allowedTarget(value) ? cleanSocialMediaUrl(value) : value);
+    const candidate = candidates
       .find((value) => value && allowedTarget(value));
     if (!candidate) throw new Error("This post did not expose public downloadable media");
-    keepSession = true;
     return {
-      browserSessionId: browser.sessionId(),
       title: data.title || "Social video",
       author: data.author || new URL(target).hostname.replace(/^www\./, ""),
       durationSeconds: Number.isFinite(data.durationSeconds) ? data.durationSeconds : 0,
@@ -685,21 +869,20 @@ async function resolveSocialWithBrowser(env, target) {
         },
         {
           itag: 1001,
-          url: candidate,
+          url: responseAudio?.url || candidate,
           mimeType: "audio/mp4; codecs=\"mp4a\"",
           audioQuality: "SOURCE_AUDIO",
           hasVideo: false,
           hasAudio: true,
-          derivedFromVideo: true,
+          derivedFromVideo: !responseAudio,
         },
       ],
     };
   } finally {
-    if (keepSession) await browser.disconnect().catch(() => {});
-    else {
-      await page.close().catch(() => {});
-      await browser.close().catch(() => {});
-    }
+    browser.off("targetcreated", attachMediaTarget);
+    await Promise.all(childSessions.map((session) => session.detach().catch(() => {})));
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
   }
 }
 
@@ -712,16 +895,22 @@ async function browserMediaChunk(env, sessionId, target, range, closeAfter) {
     cdp = await page.target().createCDPSession();
     const frameTree = await cdp.send("Page.getFrameTree");
     const mediaUrl = new URL(target);
-    mediaUrl.searchParams.set("range", range.replace(/^bytes=/, ""));
+    const queryRange = mediaUrl.hostname.endsWith("googlevideo.com");
+    if (queryRange) mediaUrl.searchParams.set("range", range.replace(/^bytes=/, ""));
+    else await cdp.send("Network.setExtraHTTPHeaders", { headers: { Range: range } });
     const loaded = await cdp.send("Network.loadNetworkResource", {
       frameId: frameTree.frameTree.frame.id,
       url: mediaUrl.toString(),
-      options: { disableCache: true, includeCredentials: false },
+      options: { disableCache: true, includeCredentials: true },
     });
     const resource = loaded.resource;
     if (!resource?.success || !resource.stream) {
-      const fallback = await page.evaluate(async (url) => {
-        const response = await fetch(url, { cache: "no-store", credentials: "include" });
+      const fallback = await page.evaluate(async ({ url, requestedRange }) => {
+        const response = await fetch(url, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { Range: requestedRange },
+        });
         const buffer = new Uint8Array(await response.arrayBuffer());
         let binary = "";
         for (let start = 0; start < buffer.length; start += 0x8000) {
@@ -734,7 +923,7 @@ async function browserMediaChunk(env, sessionId, target, range, closeAfter) {
           contentType: response.headers.get("content-type"),
           contentRange: response.headers.get("content-range"),
         };
-      }, mediaUrl.toString());
+      }, { url: mediaUrl.toString(), requestedRange: range });
       if (!fallback.ok) throw new Error(`Source returned ${fallback.status || resource?.httpStatusCode || "an error"}`);
       const binary = atob(fallback.data);
       const bytes = new Uint8Array(binary.length);
@@ -790,6 +979,44 @@ function upstreamHeaders(request) {
     if (REQUEST_HEADERS.has(lower) || lower.startsWith("x-youtube-") || lower.startsWith("x-goog-")) headers.set(name, value);
   }
   return headers;
+}
+
+async function refreshSourceSession(source) {
+  const sourceUrl = new URL(source);
+  if (!sourceUrl.hostname.endsWith("tiktok.com")) return new Headers();
+  const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/136 Safari/537.36";
+  const response = await fetch(source, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "accept-language": "en-US,en;q=0.9",
+      "user-agent": userAgent,
+    },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) throw new Error("Could not refresh the source session");
+  const setCookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : String(response.headers.get("set-cookie") || "").split(/,(?=[^;,]+=)/);
+  const html = await response.text();
+  const cookie = setCookies.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ");
+  const headers = new Headers({
+    origin: "https://www.tiktok.com",
+    referer: source,
+    "user-agent": userAgent,
+  });
+  if (cookie) headers.set("cookie", cookie);
+  const match = html.match(/<script[^>]+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i);
+  let mediaUrl = "";
+  if (match) {
+    try {
+      const payload = JSON.parse(decodeHtmlText(match[1]));
+      const item = payload?.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo?.itemStruct;
+      mediaUrl = tikTokVideoCandidates(item)[0]?.url || "";
+    } catch {
+      // The original signed URL remains as a fallback.
+    }
+  }
+  return { headers, mediaUrl };
 }
 
 function stableUpstreamTarget(target, method) {
@@ -858,10 +1085,9 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const videoId = requestUrl.searchParams.get("videoId") || "";
       if (!/^[\w-]{11}$/.test(videoId)) return json({ error: "Invalid YouTube video id" }, 400, origin);
-      // InnerTube (ANDROID_VR/IOS clients) is the primary source: it returns
-      // the full adaptive ladder up to 2160p with direct, unsigned URLs for
-      // free. Piped is a fallback for the rare video InnerTube refuses, and the
-      // browser resolver is the last resort (unavailable on the free plan).
+      // The app normally resolves YouTube in the user's browser with a fresh
+      // proof-of-origin token. These server-side paths remain as graceful
+      // fallbacks for clients that cannot run that browser flow.
       const errors = [];
       for (const [label, resolve] of [
         ["innertube", () => resolveWithInnerTube(videoId)],
@@ -881,8 +1107,8 @@ export default {
       if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, origin);
       const target = requestUrl.searchParams.get("url") || "";
       if (!allowedSocialSource(target)) return json({ error: "Unsupported social media link" }, 400, origin);
-      // Free direct resolvers first (tikwm for TikTok, cobalt for IG/FB); the
-      // browser resolver is a fallback and is unavailable on the free plan.
+      // Direct source metadata is cheapest for TikTok. Media-source/blob
+      // players fall back to a short browser playback session.
       const socialErrors = [];
       for (const [label, resolve] of [
         ["direct", () => resolveSocialDirect(target)],
@@ -894,11 +1120,7 @@ export default {
           socialErrors.push(`${label}: ${error?.message || error}`);
         }
       }
-      const host = (() => { try { return new URL(target).hostname.replace(/^www\./, ""); } catch { return "This"; } })();
-      const isMeta = /instagram\.com|facebook\.com|fb\.watch/.test(host);
-      const message = isMeta
-        ? "Instagram and Facebook block free extraction right now. TikTok and YouTube links work."
-        : "Could not read this post. Try a TikTok or YouTube link.";
+      const message = "This public post could not be read. Check the link and try again.";
       return json({ error: message, detail: socialErrors.join(" · ") }, 502, origin);
     }
 
@@ -906,12 +1128,21 @@ export default {
 
     const target = requestUrl.searchParams.get("url") || "";
     if (!allowedTarget(target)) return json({ error: "Unsupported extraction target" }, 400, origin);
+    const source = requestUrl.searchParams.get("source") || "";
+    if (source && !allowedSocialSource(source)) return json({ error: "Unsupported source page" }, 400, origin);
     const length = Number(request.headers.get("content-length") || 0);
     if (length > 2 * 1024 * 1024) return json({ error: "Request body is too large" }, 413, origin);
 
     try {
-      const upstreamTarget = stableUpstreamTarget(target, request.method);
+      let upstreamTarget = stableUpstreamTarget(target, request.method);
       const requestHeaders = upstreamHeaders(request);
+      if (source) {
+        const refreshed = await refreshSourceSession(source);
+        refreshed.headers.forEach((value, name) => requestHeaders.set(name, value));
+        if (refreshed.mediaUrl && allowedTarget(refreshed.mediaUrl)) {
+          upstreamTarget = refreshed.mediaUrl;
+        }
+      }
       if (new URL(upstreamTarget).hostname.endsWith("youtube.com") && request.method === "POST") {
         requestHeaders.set("origin", "https://www.youtube.com");
       }

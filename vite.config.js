@@ -14,7 +14,18 @@ import {
   SITE_URL,
 } from "./src/content/seoCatalog.js";
 
-const EXTRACT_HOSTS = ["youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "googleusercontent.com"];
+const EXTRACT_HOSTS = [
+  "youtube.com",
+  "youtu.be",
+  "youtubei.googleapis.com",
+  "jnn-pa.googleapis.com",
+  "www.google.com",
+  "googlevideo.com",
+  "ytimg.com",
+  "ggpht.com",
+  "gstatic.com",
+  "googleusercontent.com",
+];
 const EXTRACT_WORKER = "https://filzy-extractor.sendfilzy-cdf.workers.dev";
 
 function allowedExtractTarget(value) {
@@ -90,7 +101,7 @@ function extractorDevProxy() {
           for (const [name, value] of Object.entries(request.headers)) {
             if (!value) continue;
             const lower = name.toLowerCase();
-            if (["accept", "accept-language", "content-type", "range", "user-agent", "x-origin"].includes(lower) || lower.startsWith("x-youtube-") || lower.startsWith("x-goog-")) {
+            if (["accept", "accept-language", "content-type", "range", "user-agent", "x-origin", "x-user-agent"].includes(lower) || lower.startsWith("x-youtube-") || lower.startsWith("x-goog-")) {
               headers.set(name, Array.isArray(value) ? value.join(", ") : value);
             }
           }

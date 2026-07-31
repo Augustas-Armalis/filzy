@@ -1,4 +1,4 @@
-import { cancelFFmpeg, fileToUint8, loadFFmpeg, onFFmpegProgress } from "@/lib/ffmpeg";
+import { cancelFFmpeg, ffmpegFailureMessage, fileToUint8, loadFFmpeg, onFFmpegProgress } from "@/lib/ffmpeg";
 import { categoryOf, extOf, FORMAT_GROUPS, normalizeFormatValue } from "@/lib/formats";
 import { convertFile } from "@/lib/convert";
 
@@ -283,9 +283,16 @@ async function runFfmpeg(file, outName, argsFor, { signal, onStatus, onProgress 
     onFFmpegProgress((progress) => onProgress?.(progress));
     await ffmpeg.writeFile(inName, await fileToUint8(file));
     throwIfAborted(signal);
-    await ffmpeg.exec(argsFor(inName, outName));
+    const exitCode = await ffmpeg.exec(argsFor(inName, outName));
+    if (exitCode !== 0) throw new Error(ffmpegFailureMessage("Compression failed"));
     throwIfAborted(signal);
-    const data = await ffmpeg.readFile(outName);
+    let data;
+    try {
+      data = await ffmpeg.readFile(outName);
+    } catch (error) {
+      const detail = typeof error === "string" ? error : error?.message;
+      throw new Error(detail || ffmpegFailureMessage("Could not read the compressed file"));
+    }
     return new Uint8Array(data);
   } finally {
     signal?.removeEventListener("abort", cancel);
