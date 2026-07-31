@@ -1,4 +1,4 @@
-import { flattenTransferItems, swissTransferId } from "./swissCompanion";
+import { flattenTransferItems, hostedTransferId } from "./transferCompanion";
 
 const DROP_API = import.meta.env.VITE_DROP_API || "https://filzy-signaling.sendfilzy-cdf.workers.dev";
 
@@ -19,25 +19,23 @@ async function request(path, options = {}) {
   return payload;
 }
 
-export async function createDropShare({ transferUrl, items, note, expiresInDays }) {
+export async function createDropShare({ transfer, items, note, expiresInDays }) {
   const id = shortId();
-  const transferId = swissTransferId(transferUrl);
+  const transferId = hostedTransferId(transfer.transferUrl);
   const files = flattenTransferItems(items).map((file) => ({ name: file.name, size: file.size, kind: file.type || "file" }));
-  try {
-    await request(`/drop/${id}/init`, {
-      method: "POST",
-      body: JSON.stringify({ transferId, files, note, expiresInDays }),
-    });
-    return { id, shareUrl: `${window.location.origin}/d/${id}` };
-  } catch {
-    // Deployment-safe fallback: the transfer remains usable while the metadata
-    // Worker is being updated, but loses the short Filzy record and note.
-    return { id: `s-${transferId}`, shareUrl: `${window.location.origin}/d/s-${transferId}`, direct: true };
-  }
+  await request(`/drop/${id}/init`, {
+    method: "POST",
+    body: JSON.stringify({ transferId, files, access: transfer.access, note, expiresInDays }),
+  });
+  return { id, shareUrl: `${window.location.origin}/d/${id}` };
 }
 
 export function getDropShare(id) {
   return request(`/drop/${encodeURIComponent(id)}`);
+}
+
+export function dropFileUrl(id, index) {
+  return `${DROP_API}/drop/${encodeURIComponent(id)}/files/${index}`;
 }
 
 export { DROP_API };

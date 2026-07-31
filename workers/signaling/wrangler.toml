@@ -4,7 +4,8 @@ compatibility_date = "2025-01-01"
 
 # One Durable Object "room" per Beam id — it relays the WebRTC handshake
 # (SDP/ICE) between the two peers. NO FILE BYTES pass through here; the transfer
-# itself is pure peer-to-peer. Free tier eligible: the class is SQLite-backed
+# itself is pure peer-to-peer. Drop and Pool reuse this Worker for short-link
+# metadata and streamed downloads. The class is SQLite-backed
 # (required for the free plan) and uses WebSocket Hibernation, so an idle room
 # costs nothing while still holding the connection open.
 [[durable_objects.bindings]]

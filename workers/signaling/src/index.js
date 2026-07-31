@@ -2,9 +2,11 @@
  * Filzy — Signaling Worker + BeamRoom Durable Object.
  *
  * Brokers the tiny WebRTC handshake (SDP/ICE) between two peers of a Beam.
- * NO FILE BYTES EVER PASS THROUGH HERE — the transfer is pure peer-to-peer.
+ * Beam remains pure peer-to-peer, so Beam file bytes never pass through here.
  * Each Beam id maps to one Durable Object "room"; peers connect over a
  * WebSocket and the room relays messages, targeted (by `to`) or broadcast.
+ * Drop and Pool use the same Worker for short-link metadata and streamed
+ * downloads; file bodies are passed through without being buffered or stored.
  *
  * Client contract (src/lib/signaling.js → WebSocketSignaling):
  *   wss://<worker>/beam/<beamId>?self=<peerId>
@@ -23,14 +25,15 @@ export default {
       return cors(json({ ok: true, service: "filzy-signaling" }));
     }
     if (url.pathname === "/turn") return cors(await turnCreds(env));
+    if (url.pathname.startsWith("/transfer/")) return cors(await proxyTransferApi(request, url));
 
-    const poolMatch = url.pathname.match(/^\/pool\/([A-Za-z0-9_-]+)(?:\/(init|batches|close))?$/);
+    const poolMatch = url.pathname.match(/^\/pool\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
     if (poolMatch) {
       const id = env.BEAM_ROOMS.idFromName(`pool-${poolMatch[1]}`);
       return cors(await env.BEAM_ROOMS.get(id).fetch(request));
     }
 
-    const dropMatch = url.pathname.match(/^\/drop\/([A-Za-z0-9_-]+)(?:\/(init))?$/);
+    const dropMatch = url.pathname.match(/^\/drop\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
     if (dropMatch) {
       const id = env.BEAM_ROOMS.idFromName(`drop-${dropMatch[1]}`);
       return cors(await env.BEAM_ROOMS.get(id).fetch(request));
@@ -72,8 +75,9 @@ function json(obj) {
 function cors(res) {
   const headers = new Headers(res.headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "*");
+  headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition");
   return new Response(res.body, {
     status: res.status,
     statusText: res.statusText,
@@ -113,8 +117,16 @@ export class BeamRoom {
   }
 
   async poolRequest(request, url) {
+    const fileMatch = url.pathname.match(/^\/pool\/[^/]+\/files\/([A-Za-z0-9_-]+)\/(\d+)$/);
     const action = (url.pathname.match(/^\/pool\/[^/]+(?:\/(init|batches|close))?$/) || [])[1] || "read";
     const state = await this.ctx.storage.get("pool");
+    if (["GET", "HEAD"].includes(request.method) && fileMatch) {
+      if (!state) return poolJson({ error: "Pool not found." }, 404);
+      if (state.expiresAt <= Date.now()) return poolJson({ error: "This pool has expired." }, 410);
+      const batch = state.batches.find((candidate) => candidate.id === fileMatch[1]);
+      if (!batch) return poolJson({ error: "File not found." }, 404);
+      return proxyTransferFile(request, batch.access, Number(fileMatch[2]), batch.files);
+    }
     if (request.method === "GET" && action === "read") {
       if (!state) return poolJson({ error: "Pool not found." }, 404);
       if (state.expiresAt <= Date.now()) {
@@ -161,13 +173,15 @@ export class BeamRoom {
         size: Math.max(0, Math.min(Number(file?.size) || 0, 50 * 1024 ** 3)),
         kind: cleanPoolText(file?.kind, 24),
       })) : [];
-      if (!/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1) return poolJson({ error: "Invalid transfer metadata." }, 400);
+      const access = cleanTransferAccess(body.access, files);
+      if (!/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1 || !access) return poolJson({ error: "Invalid transfer metadata." }, 400);
       if (state.batches.some((batch) => batch.transferId === transferId)) return poolJson(publicPool(state));
       state.batches.push({
         id: crypto.randomUUID(),
         transferId,
         createdAt: Date.now(),
         files,
+        access,
       });
       state.batches = state.batches.slice(-100);
       await this.ctx.storage.put("pool", state);
@@ -176,15 +190,21 @@ export class BeamRoom {
     return poolJson({ error: "Not found." }, 404);
   }
 
-  async dropRequest(request) {
+  async dropRequest(request, url) {
     const state = await this.ctx.storage.get("drop");
+    const fileMatch = url.pathname.match(/^\/drop\/[^/]+\/files\/(\d+)$/);
+    if (["GET", "HEAD"].includes(request.method) && fileMatch) {
+      if (!state) return poolJson({ error: "Transfer not found." }, 404);
+      if (state.expiresAt <= Date.now()) return poolJson({ error: "This transfer has expired." }, 410);
+      return proxyTransferFile(request, state.access, Number(fileMatch[1]), state.files);
+    }
     if (request.method === "GET") {
       if (!state) return poolJson({ error: "Transfer not found." }, 404);
       if (state.expiresAt <= Date.now()) {
         await this.ctx.storage.deleteAll();
         return poolJson({ error: "This transfer has expired." }, 410);
       }
-      return poolJson(state);
+      return poolJson(publicDrop(state));
     }
     if (request.method !== "POST") return poolJson({ error: "Method not allowed." }, 405);
     if (state) return poolJson({ error: "Transfer already exists." }, 409);
@@ -196,19 +216,21 @@ export class BeamRoom {
       size: Math.max(0, Math.min(Number(file?.size) || 0, 50 * 1024 ** 3)),
       kind: cleanPoolText(file?.kind, 80),
     })) : [];
-    if (![1, 7, 15, 30].includes(days) || !/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1) {
+    const access = cleanTransferAccess(body?.access, files);
+    if (![1, 7, 15, 30].includes(days) || !/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1 || !access) {
       return poolJson({ error: "Invalid transfer metadata." }, 400);
     }
     const drop = {
       note: cleanPoolText(body.note, 100),
       transferId,
       files,
+      access,
       createdAt: Date.now(),
       expiresAt: Date.now() + days * 24 * 60 * 60 * 1000,
     };
     await this.ctx.storage.put("drop", drop);
     await this.ctx.storage.setAlarm(drop.expiresAt);
-    return poolJson(drop, 201);
+    return poolJson(publicDrop(drop), 201);
   }
 
   async alarm() {
@@ -286,10 +308,10 @@ function cleanPoolText(value, max) {
 
 async function safePoolJson(request) {
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > 256 * 1024) return null;
+  if (length > 512 * 1024) return null;
   try {
     const text = await request.text();
-    if (text.length > 256 * 1024) return null;
+    if (text.length > 512 * 1024) return null;
     return JSON.parse(text);
   } catch { return null; }
 }
@@ -306,8 +328,99 @@ function publicPool(pool) {
     createdAt: pool.createdAt,
     expiresAt: pool.expiresAt,
     closed: pool.closed,
-    batches: pool.batches,
+    batches: pool.batches.map(({ access, ...batch }) => batch),
   };
+}
+
+function publicDrop(drop) {
+  const { access, ...value } = drop;
+  return value;
+}
+
+function cleanTransferAccess(value, files) {
+  if (!value || typeof value !== "object") return null;
+  const entries = Array.isArray(value.files) ? value.files : [];
+  if (value.provider !== "temporary" || entries.length !== files.length) return null;
+  const cleaned = entries.map((entry) => ({
+    id: String(entry?.id || ""),
+    name: String(entry?.name || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 500),
+  }));
+  if (cleaned.some((entry) => !/^[A-Za-z0-9_-]{9,24}$/.test(entry.id) || !entry.name)) return null;
+  return { provider: "temporary", files: cleaned };
+}
+
+async function proxyTransferFile(request, access, index, files) {
+  const entry = access?.files?.[index];
+  const publicFile = files?.[index];
+  if (!entry || !publicFile || !Number.isInteger(index) || index < 0) return poolJson({ error: "File not found." }, 404);
+  const upstreamUrl = `https://storage.to/${encodeURIComponent(entry.id)}/download`;
+  const requestHeaders = new Headers();
+  for (const name of ["range", "if-match", "if-none-match", "if-modified-since", "if-unmodified-since"]) {
+    const value = request.headers.get(name);
+    if (value) requestHeaders.set(name, value);
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: request.method === "HEAD" ? "HEAD" : "GET",
+      headers: requestHeaders,
+      redirect: "follow",
+    });
+  } catch {
+    return poolJson({ error: "The download could not be reached." }, 502);
+  }
+  if (![200, 206].includes(upstream.status)) return poolJson({ error: "This file is no longer available." }, upstream.status === 404 ? 410 : 502);
+
+  const headers = new Headers();
+  for (const name of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"]) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  const filename = String(publicFile.name || entry.name || "download");
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  headers.set("content-disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  headers.set("cache-control", "private, no-store");
+  return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
+}
+
+const TRANSFER_API_ROUTES = [
+  ["POST", /^\/transfer\/upload\/(?:init|parts|complete-multipart|abort|confirm)$/],
+  ["POST", /^\/transfer\/collection$/],
+  ["POST", /^\/transfer\/collection\/[A-Za-z0-9_-]{9,24}\/(?:ready|expiry)$/],
+  ["DELETE", /^\/transfer\/collection\/[A-Za-z0-9_-]{9,24}$/],
+  ["POST", /^\/transfer\/file\/[A-Za-z0-9_-]{9,24}\/expiry$/],
+];
+
+async function proxyTransferApi(request, url) {
+  if (!TRANSFER_API_ROUTES.some(([method, pattern]) => request.method === method && pattern.test(url.pathname))) {
+    return poolJson({ success: false, error: "Not found." }, 404);
+  }
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > 128 * 1024) return poolJson({ success: false, error: "Request too large." }, 413);
+  const headers = new Headers({ "content-type": "application/json" });
+  for (const name of ["x-visitor-token", "authorization", "x-owner-token"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  let response;
+  try {
+    response = await fetch(`https://storage.to/api${url.pathname.slice("/transfer".length)}`, {
+      method: request.method,
+      headers,
+      body: request.method === "DELETE" ? undefined : await request.text(),
+      redirect: "manual",
+    });
+  } catch {
+    return poolJson({ success: false, error: "The upload service could not be reached." }, 502);
+  }
+  const responseHeaders = new Headers({
+    "content-type": response.headers.get("content-type") || "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) responseHeaders.set("retry-after", retryAfter);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
 }
 
 function poolJson(value, status = 200) {

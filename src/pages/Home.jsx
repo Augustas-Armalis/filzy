@@ -4,7 +4,7 @@ import { Cloud, Plus, Radio, WavesLadder } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { DropBox, FileList } from "@/components/BeamUpload";
 import { Streaming, StreamStopped } from "@/components/Streaming";
-import { TransferFileList, TransferProgress, TransferSuccess } from "@/components/SwissTransferUI";
+import { ExpirySelect, TransferFileList, TransferProgress, TransferSuccess } from "@/components/TransferUI";
 import { CtaButton, Dropzone, TabBar } from "@/components/ui";
 import { basePages, seoPageForPath } from "@/content/seoCatalog";
 import { useBeamHost } from "@/hooks/useBeamHost";
@@ -12,7 +12,7 @@ import { gatherDropItems, kindOf } from "@/lib/files";
 import { pageJsonLd, useSeo } from "@/lib/seo";
 import { addPoolTransfer, createPool, poolShareUrl } from "@/lib/pools";
 import { createDropShare } from "@/lib/drops";
-import { cancelSwissJob, openCompanion, openSwissJob, startSwissTransfer, waitForSwissTransfer } from "@/lib/swissCompanion";
+import { cancelTransferJob, startHostedTransfer, waitForHostedTransfer } from "@/lib/transferCompanion";
 
 const TABS = [
   { id: "drop", label: "Drop", Icon: Cloud },
@@ -53,10 +53,10 @@ export default function Home() {
   const [items, setItems] = useState([]);
   const [note, setNote] = useState("");
   const [poolName, setPoolName] = useState("");
-  const [expiry, setExpiry] = useState(30);
+  const [expiry, setExpiry] = useState(7);
   const [isDragging, setIsDragging] = useState(false);
   const [cardHeight, setCardHeight] = useState();
-  const [swiss, setSwiss] = useState({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
+  const [transfer, setTransfer] = useState({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
   const dragDepth = useRef(0);
   const inputRef = useRef(null);
   const innerRef = useRef(null);
@@ -122,77 +122,77 @@ export default function Home() {
   const beginDrop = async () => {
     const controller = new AbortController();
     abortRef.current = controller;
-    setPhase("swiss");
-    setSwiss({ state: "staging", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
+    setPhase("transfer");
+    setTransfer({ state: "staging", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
     try {
-      const started = await startSwissTransfer({
+      const started = await startHostedTransfer({
         items,
         expiresInDays: expiry,
         message: note,
         signal: controller.signal,
-        onProgress: (localProgress) => setSwiss((value) => ({ ...value, localProgress })),
-        onState: (job) => setSwiss((value) => ({ ...value, ...job, jobId: job.id })),
+        onProgress: (localProgress) => setTransfer((value) => ({ ...value, localProgress })),
+        onState: (job) => setTransfer((value) => ({ ...value, ...job, jobId: job.id })),
       });
-      setSwiss((value) => ({ ...value, ...started, jobId: started.id }));
-      const complete = await waitForSwissTransfer(started.id, {
+      setTransfer((value) => ({ ...value, ...started, jobId: started.id }));
+      const complete = await waitForHostedTransfer(started.id, {
         signal: controller.signal,
-        onState: (job) => setSwiss((value) => ({ ...value, ...job, jobId: job.id })),
+        onState: (job) => setTransfer((value) => ({ ...value, ...job, jobId: job.id })),
       });
-      const share = await createDropShare({ transferUrl: complete.transferUrl, items, note, expiresInDays: expiry });
-      setSwiss((value) => ({ ...value, ...complete, shareUrl: share.shareUrl }));
-      setPhase("swiss-success");
+      const share = await createDropShare({ transfer: complete, items, note, expiresInDays: expiry });
+      setTransfer((value) => ({ ...value, ...complete, shareUrl: share.shareUrl }));
+      setPhase("transfer-success");
     } catch (error) {
       if (error?.name === "AbortError") return;
-      setSwiss((value) => ({ ...value, state: "error", error: error?.message || "Transfer stopped." }));
+      setTransfer((value) => ({ ...value, state: "error", error: error?.message || "Transfer stopped." }));
     }
   };
 
   const beginPool = async () => {
     const controller = new AbortController();
     abortRef.current = controller;
-    setPhase("swiss");
-    setSwiss({ state: "opening", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
+    setPhase("transfer");
+    setTransfer({ state: "opening", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
     try {
       const created = await createPool({ name: poolName, expiresInDays: expiry });
       const shareUrl = poolShareUrl(created.id);
       if (!hasFiles) {
-        setSwiss((value) => ({ ...value, state: "complete", shareUrl, poolId: created.id }));
-        setPhase("swiss-success");
+        setTransfer((value) => ({ ...value, state: "complete", shareUrl, poolId: created.id }));
+        setPhase("transfer-success");
         return;
       }
-      setSwiss((value) => ({ ...value, state: "staging", poolId: created.id, shareUrl }));
-      const started = await startSwissTransfer({
+      setTransfer((value) => ({ ...value, state: "staging", poolId: created.id, shareUrl }));
+      const started = await startHostedTransfer({
         items,
         expiresInDays: expiry,
         title: poolName || "Filzy pool upload",
         signal: controller.signal,
-        onProgress: (localProgress) => setSwiss((value) => ({ ...value, localProgress })),
-        onState: (job) => setSwiss((value) => ({ ...value, ...job, jobId: job.id, poolId: created.id, shareUrl })),
+        onProgress: (localProgress) => setTransfer((value) => ({ ...value, localProgress })),
+        onState: (job) => setTransfer((value) => ({ ...value, ...job, jobId: job.id, poolId: created.id, shareUrl })),
       });
-      const complete = await waitForSwissTransfer(started.id, {
+      const complete = await waitForHostedTransfer(started.id, {
         signal: controller.signal,
-        onState: (job) => setSwiss((value) => ({ ...value, ...job, jobId: job.id, poolId: created.id, shareUrl })),
+        onState: (job) => setTransfer((value) => ({ ...value, ...job, jobId: job.id, poolId: created.id, shareUrl })),
       });
-      await addPoolTransfer(created.id, complete.transferUrl, items);
-      setSwiss((value) => ({ ...value, ...complete, shareUrl, poolId: created.id }));
-      setPhase("swiss-success");
+      await addPoolTransfer(created.id, complete, items);
+      setTransfer((value) => ({ ...value, ...complete, shareUrl, poolId: created.id }));
+      setPhase("transfer-success");
     } catch (error) {
       if (error?.name === "AbortError") return;
-      setSwiss((value) => ({ ...value, state: "error", error: error?.message || "Pool creation stopped." }));
+      setTransfer((value) => ({ ...value, state: "error", error: error?.message || "Pool creation stopped." }));
     }
   };
 
   const cancelDrop = async () => {
     abortRef.current?.abort();
-    if (swiss.jobId) await cancelSwissJob(swiss.jobId).catch(() => {});
-    setSwiss({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
+    if (transfer.jobId) await cancelTransferJob(transfer.jobId).catch(() => {});
+    setTransfer({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
     setPhase("upload");
   };
 
   const reset = () => {
     items.forEach((item) => item.url && URL.revokeObjectURL(item.url));
     setItems([]); setNote(""); setPoolName(""); setPhase("upload");
-    setSwiss({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
+    setTransfer({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
   };
 
   const startCurrent = () => {
@@ -214,7 +214,7 @@ export default function Home() {
                   onOpen={openPicker}
                   Icon={Plus}
                   title="Add files"
-                  subtitle={activeId === "pool" ? "Add now, or open an empty pool" : "Up to 50 GB through SwissTransfer"}
+                  subtitle={activeId === "pool" ? "Add now, or open an empty pool" : "Share up to 25 GB with one link"}
                   dragTitle="Drop files to add"
                 />
               )}
@@ -225,7 +225,7 @@ export default function Home() {
             <TransferFileList items={items} onRemove={removeItem} onOpen={openPicker} mode={activeId} note={note} setNote={setNote} expiry={expiry} setExpiry={setExpiry} poolName={poolName} setPoolName={setPoolName} isDragging={isDragging} />
           )}
           {activeId === "pool" && !hasFiles && (
-            <div className="flex gap-[4px]"><select aria-label="Pool expiry" value={expiry} onChange={(event) => setExpiry(Number(event.target.value))} className="h-[36px] min-w-0 flex-1 rounded-[10px] border border-border bg-white px-[10px] text-[13px] text-text outline-none">{[1, 7, 15, 30].map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"}</option>)}</select><input value={poolName} onChange={(event) => setPoolName(event.target.value)} placeholder="Pool name…" className="h-[36px] min-w-0 flex-1 rounded-[10px] border border-border bg-white px-[10px] text-[13px] text-text outline-none" /></div>
+            <div className="flex gap-[4px]"><ExpirySelect value={expiry} onChange={setExpiry} /><input value={poolName} onChange={(event) => setPoolName(event.target.value)} placeholder="Pool name…" className="h-[36px] min-w-0 flex-1 rounded-[10px] border border-border bg-white px-[10px] text-[13px] text-text outline-none placeholder:text-dalt-text focus:border-text/50" /></div>
           )}
           <CtaButton label={activeId === "beam" ? "Start streaming" : activeId === "pool" ? "Start a pool" : "Get a link"} disabled={activeId !== "pool" && !hasFiles} onClick={startCurrent} />
         </div>
@@ -237,10 +237,10 @@ export default function Home() {
     <>
       <div className="flex min-h-[100svh] shrink-0 items-center justify-center px-[10px] pb-[44px] pt-[60px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
         <AnimatePresence mode="wait">
-          {phase === "upload" ? uploadCard : phase === "swiss" ? (
-            <motion.div key="swiss" {...phaseSwap} className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]"><TransferProgress state={swiss.state} localProgress={swiss.localProgress} transferProgress={swiss.transferProgress} error={swiss.error} onCancel={cancelDrop} onOpenCompanion={openCompanion} onOpenSwiss={() => swiss.jobId && openSwissJob(swiss.jobId)} /></motion.div>
-          ) : phase === "swiss-success" ? (
-            <motion.div key="success" {...phaseSwap} className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]"><TransferSuccess shareUrl={swiss.shareUrl} pool={Boolean(swiss.poolId)} onReset={reset} /></motion.div>
+          {phase === "upload" ? uploadCard : phase === "transfer" ? (
+            <motion.div key="transfer" {...phaseSwap} className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]"><TransferProgress state={transfer.state} localProgress={transfer.localProgress} transferProgress={transfer.transferProgress} error={transfer.error} onCancel={cancelDrop} onRetry={activeId === "pool" ? beginPool : beginDrop} /></motion.div>
+          ) : phase === "transfer-success" ? (
+            <motion.div key="success" {...phaseSwap} className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]"><TransferSuccess shareUrl={transfer.shareUrl} pool={Boolean(transfer.poolId)} onReset={reset} /></motion.div>
           ) : phase === "stopped" ? (
             <motion.div key="stopped" {...phaseSwap}><StreamStopped onUploadMore={reset} /></motion.div>
           ) : (

@@ -8,7 +8,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "companion": "node scripts/swiss-companion.mjs",
     "test": "vitest run",
     "seo:indexnow": "node scripts/submit-indexnow.mjs"
   },
@@ -22,7 +21,6 @@
     "mediabunny": "^1.51.0",
     "mqtt": "^5.15.1",
     "pdf-lib": "^1.17.1",
-    "playwright-core": "^1.62.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

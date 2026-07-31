@@ -17,7 +17,7 @@ export const SVG_TRACE_QUALITIES = [
 
 const QUALITY_BY_ID = Object.fromEntries(SVG_TRACE_QUALITIES.map((quality) => [quality.id, quality]));
 
-// These mirror the useful families in PicSVG, but each preset deliberately
+// These cover the useful tracing families, while each preset deliberately
 // changes both path fitting and preprocessing so adjacent choices are visible.
 const FILTER_OPTIONS = {
   edge1: { tracer: { linefilter: true, rightangleenhance: false, pathomit: 20, ltres: 1.6, qtres: 1.6 }, preprocess: { contrast: 1.02, backgroundTolerance: 18 } },

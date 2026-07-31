@@ -3,7 +3,7 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/components/Shell";
 import Home from "@/pages/Home";
 import ReceivePage from "@/pages/ReceivePage";
-import SwissReceivePage from "@/pages/SwissReceivePage";
+import DropReceivePage from "@/pages/DropReceivePage";
 import PoolPage from "@/pages/PoolPage";
 import NotFound from "@/pages/NotFound";
 
@@ -24,7 +24,7 @@ function AnimatedRoutes() {
             <Route path="/" element={<Home />} />
             <Route path="/send/:intent" element={<Home />} />
             <Route path="/s/:id" element={<ReceivePage />} />
-            <Route path="/d/:transferId" element={<SwissReceivePage />} />
+            <Route path="/d/:transferId" element={<DropReceivePage />} />
             <Route path="/p/:poolId" element={<PoolPage />} />
             <Route path="/convert" element={<Convert />} />
             <Route path="/convert/:pair" element={<Convert />} />

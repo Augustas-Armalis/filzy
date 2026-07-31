@@ -1,5 +1,5 @@
 // Local conversion formats plus the broader catalog used by the Convert UI.
-// The catalog mirrors CloudConvert's public 212-format grouping (2026-07-15),
+// Broad format catalog used by Filzy's local and staged conversion engines.
 // but capability is explicit: disabled catalog entries are visible road-map
 // items, never fake conversion promises.
 

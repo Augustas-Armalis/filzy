@@ -25,7 +25,7 @@ let uid = 0;
 const STORAGE_KEY = "filzy:compress-target:v2";
 const TARGET_PRESETS = [
   { id: "discord", label: "10 MB", mb: 10 },
-  { id: "email", label: "25 MB", mb: 25 },
+  { id: "small", label: "25 MB", mb: 25 },
 ];
 
 const QUALITY_OPTIONS = [

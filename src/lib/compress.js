@@ -4,7 +4,7 @@ import { convertFile } from "@/lib/convert";
 
 export const PRESETS = [
   { id: "discord", label: "Discord", mb: 10 },
-  { id: "email", label: "Email", mb: 25 },
+  { id: "small", label: "25 MB", mb: 25 },
 ];
 
 const MEDIA_GROUPS = new Set(["image", "video", "audio"]);

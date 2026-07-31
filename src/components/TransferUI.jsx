@@ -1,27 +1,28 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, ExternalLink, Link as LinkIcon, PartyPopper, Plus, QrCode, UploadCloud, WavesLadder, X } from "lucide-react";
+import { CalendarDays, ChevronDown, Download, Link as LinkIcon, LoaderCircle, PartyPopper, Plus, QrCode, UploadCloud, WavesLadder, X } from "lucide-react";
 import { Row } from "@/components/BeamUpload";
 import { QRCode } from "@/components/QRCode";
 import { CtaButton, ProgressBar, StackIcon } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/files";
+import { dropFileUrl } from "@/lib/drops";
 
-const EXPIRIES = [1, 7, 15, 30];
+const EXPIRIES = [1, 7];
 
-function SelectField({ value, onChange, children, ariaLabel }) {
+export function ExpirySelect({ value, onChange, className }) {
   return (
-    <div className="relative min-w-0 flex-1">
+    <div className={cn("relative min-w-0 flex-1", className)}>
       <select
-        aria-label={ariaLabel}
+        aria-label="Link expiry"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-[36px] w-full appearance-none rounded-[10px] border border-border bg-white pl-[31px] pr-[28px] text-[13px] text-text outline-none transition-colors hover:bg-white-hover focus:border-text/50"
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-[36px] w-full cursor-pointer appearance-none rounded-[10px] border border-border bg-white pl-[31px] pr-[28px] text-[13px] text-text outline-none transition-colors hover:bg-white-hover focus:border-text/50"
       >
-        {children}
+        {EXPIRIES.map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"}</option>)}
       </select>
       <CalendarDays size={14} strokeWidth={1.17} absoluteStrokeWidth className="pointer-events-none absolute left-[10px] top-[11px] text-alt-text" />
-      <span className="pointer-events-none absolute right-[10px] top-[10px] text-[12px] text-alt-text">⌄</span>
+      <ChevronDown size={14} strokeWidth={1.17} absoluteStrokeWidth className="pointer-events-none absolute right-[9px] top-[11px] text-alt-text" />
     </div>
   );
 }
@@ -54,7 +55,7 @@ export function TransferFileList({ items, onRemove, onOpen, mode, note, setNote,
         <div className="flex min-w-0 items-center gap-[5px] text-[13px] text-alt-text">
           <span>{items.length} item{items.length === 1 ? "" : "s"}</span><span className="h-[2.5px] w-[2.5px] rounded-full bg-border" /><span>{formatBytes(totalBytes)}</span>
         </div>
-        <button type="button" onClick={onOpen} className="flex h-[30px] items-center gap-[5px] rounded-[9px] border border-border bg-white px-[9px] text-[13px] text-text transition-colors hover:bg-white-hover">
+        <button type="button" onClick={onOpen} className="flex h-[30px] cursor-pointer items-center gap-[5px] rounded-[9px] border border-border bg-white px-[9px] text-[13px] text-text transition-colors hover:bg-white-hover">
           <Plus size={15} strokeWidth={1.17} absoluteStrokeWidth /> Add more
         </button>
       </div>
@@ -68,9 +69,7 @@ export function TransferFileList({ items, onRemove, onOpen, mode, note, setNote,
         </AnimatePresence>
       </div>
       <div className="flex gap-[4px]">
-        <SelectField value={expiry} onChange={(value) => setExpiry(Number(value))} ariaLabel="Link expiry">
-          {EXPIRIES.map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"}</option>)}
-        </SelectField>
+        <ExpirySelect value={expiry} onChange={setExpiry} />
         <input
           value={mode === "pool" ? poolName : note}
           onChange={(event) => mode === "pool" ? setPoolName(event.target.value) : setNote(event.target.value)}
@@ -83,25 +82,23 @@ export function TransferFileList({ items, onRemove, onOpen, mode, note, setNote,
   );
 }
 
-export function TransferProgress({ state, localProgress, transferProgress, error, onCancel, onOpenCompanion, onOpenSwiss }) {
-  const verifying = state === "verification";
-  const staging = ["receiving", "staging"].includes(state);
-  const value = staging ? localProgress : transferProgress;
-  const label = staging ? "Preparing your files…" : verifying ? "Verify once in SwissTransfer" : "Your files are being uploaded…";
+export function TransferProgress({ state, localProgress, transferProgress, error, onCancel, onRetry }) {
+  const staging = ["receiving", "staging", "opening", "loading-files"].includes(state);
+  const value = Math.max(localProgress || 0, transferProgress || 0);
+  const label = staging ? "Preparing your files…" : "Uploading your files…";
+  const detail = staging ? "Keeping everything ready for a clean upload." : `${Math.round((value || 0) * 100)}% complete`;
   return (
     <div className="flex flex-col gap-[8px]">
-      <div className="flex min-h-[142px] flex-col items-center justify-center gap-[11px] rounded-[12px] border border-border bg-bg px-[18px] text-center">
+      <div className="flex min-h-[126px] flex-col items-center justify-center gap-[9px] rounded-[12px] border border-border bg-bg px-[18px] text-center">
         <StackIcon Icon={UploadCloud} />
         <div>
           <p className="text-[14px] text-text">{error || label}</p>
-          <p className="text-[11px] text-alt-text">{verifying ? "Complete the code check in the opened window." : "SwissTransfer stores the transfer; Filzy keeps the interface simple."}</p>
+          {!error && <p className="text-[11px] text-alt-text">{detail}</p>}
         </div>
-        {!verifying && !error && <ProgressBar value={value || 0} className="max-w-[240px]" />}
+        {!error && <ProgressBar value={value || 0} className="max-w-[240px]" />}
       </div>
       {error ? (
-        <div className="flex gap-[4px]"><CtaButton label="Open companion" onClick={onOpenCompanion} /><IconButton label="Back" Icon={X} onClick={onCancel} /></div>
-      ) : verifying ? (
-        <div className="flex gap-[4px]"><CtaButton label="Open SwissTransfer" onClick={onOpenSwiss} /><IconButton label="Cancel" Icon={X} onClick={onCancel} /></div>
+        <div className="flex gap-[4px]"><CtaButton label="Try again" onClick={onRetry} /><IconButton label="Back" Icon={X} onClick={onCancel} /></div>
       ) : (
         <CtaButton label="Cancel upload" onClick={onCancel} />
       )}
@@ -110,7 +107,18 @@ export function TransferProgress({ state, localProgress, transferProgress, error
 }
 
 function IconButton({ label, Icon, onClick }) {
-  return <button type="button" aria-label={label} onClick={onClick} className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[11px] border border-border bg-white transition-colors hover:bg-white-hover"><Icon size={16} strokeWidth={1.17} absoluteStrokeWidth className="text-text" /></button>;
+  return <button type="button" aria-label={label} onClick={onClick} className="flex h-[38px] w-[38px] shrink-0 cursor-pointer items-center justify-center rounded-[11px] border border-border bg-white transition-colors hover:bg-white-hover"><Icon size={16} strokeWidth={1.17} absoluteStrokeWidth className="text-text" /></button>;
+}
+
+export function TransferLoading({ label = "Opening…" }) {
+  return (
+    <div className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]">
+      <div className="flex min-h-[126px] flex-col items-center justify-center gap-[9px] rounded-[12px] border border-border bg-bg px-[18px] text-center">
+        <StackIcon Icon={LoaderCircle} spin />
+        <p className="text-[14px] text-text">{label}</p>
+      </div>
+    </div>
+  );
 }
 
 export function TransferSuccess({ shareUrl, pool = false, onReset }) {
@@ -139,22 +147,17 @@ export function TransferSuccess({ shareUrl, pool = false, onReset }) {
   );
 }
 
-export function SwissReceiveCard({ transferId }) {
-  const url = `https://www.swisstransfer.com/d/${transferId}`;
-  return (
-    <div className="glass-surface flex w-full max-w-[280px] flex-col gap-[8px] rounded-2xl border border-white/30 bg-white/55 p-[8px]">
-      <div className="flex min-h-[142px] flex-col items-center justify-center gap-[10px] rounded-[12px] border border-border bg-bg px-[20px] text-center">
-        <StackIcon Icon={LinkIcon} />
-        <div><p className="text-[14px] text-text">Files shared with Filzy</p><p className="text-[11px] text-alt-text">SwissTransfer securely hosts this transfer.</p></div>
-      </div>
-      <a href={url} target="_blank" rel="noreferrer" className="flex h-[38px] items-center justify-center gap-[6px] rounded-[11px] bg-text font-casser text-[16px] font-normal text-white transition-colors hover:bg-text-hover">Open download <ExternalLink size={14} strokeWidth={1.17} absoluteStrokeWidth /></a>
-    </div>
-  );
-}
-
 export function DropReceiveCard({ share }) {
-  const url = `https://www.swisstransfer.com/d/${share.transferId}`;
   const days = Math.max(0, Math.ceil((share.expiresAt - Date.now()) / (24 * 60 * 60 * 1000)));
+  const urls = share.files.map((_, index) => dropFileUrl(share.id, index));
+  const downloadAll = () => urls.forEach((url) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
   return (
     <div className="glass-surface flex w-full max-w-[280px] flex-col gap-[8px] rounded-2xl border border-white/30 bg-white/55 p-[8px]">
       <div className="flex min-h-[92px] flex-col items-center justify-center gap-[8px] rounded-[12px] border border-border bg-bg px-[18px] text-center">
@@ -163,15 +166,15 @@ export function DropReceiveCard({ share }) {
       </div>
       <div className="flex max-h-[300px] flex-col gap-[4px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {share.files.map((file, index) => (
-          <a key={`${file.name}-${index}`} href={url} target="_blank" rel="noreferrer" className="flex h-[54px] items-center gap-[8px] rounded-[12px] border border-border bg-white p-[6px] pr-[9px] transition-colors hover:bg-white-hover">
+          <a key={`${file.name}-${index}`} href={urls[index]} download className="flex h-[54px] cursor-pointer items-center gap-[8px] rounded-[12px] border border-border bg-white p-[6px] pr-[9px] transition-colors hover:bg-white-hover">
             <span className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[7px] border border-border/60 bg-bg"><LinkIcon size={19} strokeWidth={1.3} absoluteStrokeWidth className="text-alt-text" /></span>
             <span className="min-w-0 flex-1 text-left"><span className="block truncate text-[13px] text-text">{file.name}</span><span className="block text-[11px] text-alt-text">{formatBytes(file.size)}</span></span>
-            <ExternalLink size={14} strokeWidth={1.17} absoluteStrokeWidth className="text-alt-text" />
+            <Download size={15} strokeWidth={1.17} absoluteStrokeWidth className="text-alt-text" />
           </a>
         ))}
       </div>
       <p className="text-center text-[10px] text-alt-text">Expires in {days} day{days === 1 ? "" : "s"}</p>
-      <a href={url} target="_blank" rel="noreferrer" className="flex h-[38px] items-center justify-center rounded-[11px] bg-text font-casser text-[16px] font-normal text-white transition-colors hover:bg-text-hover">Download all</a>
+      <button type="button" onClick={downloadAll} className="flex h-[38px] cursor-pointer items-center justify-center rounded-[11px] bg-text font-casser text-[16px] font-normal text-white transition-colors hover:bg-text-hover">Download all</button>
     </div>
   );
 }

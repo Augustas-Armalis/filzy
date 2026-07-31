@@ -1,4 +1,4 @@
-import { flattenTransferItems, swissTransferId } from "./swissCompanion";
+import { flattenTransferItems, hostedTransferId } from "./transferCompanion";
 
 const POOL_API = import.meta.env.VITE_POOL_API || "https://filzy-signaling.sendfilzy-cdf.workers.dev";
 
@@ -41,13 +41,17 @@ export function closePool(id, ownerSecret) {
   return poolRequest(`/pool/${encodeURIComponent(id)}/close`, { method: "POST", body: JSON.stringify({ ownerSecret }) });
 }
 
-export function addPoolTransfer(id, transferUrl, items) {
-  const transferId = swissTransferId(transferUrl);
+export function addPoolTransfer(id, transfer, items) {
+  const transferId = hostedTransferId(transfer.transferUrl);
   const files = flattenTransferItems(items).map((file) => ({ name: file.name, size: file.size, kind: file.type || "file" }));
   return poolRequest(`/pool/${encodeURIComponent(id)}/batches`, {
     method: "POST",
-    body: JSON.stringify({ transferId, files }),
+    body: JSON.stringify({ transferId, files, access: transfer.access }),
   });
+}
+
+export function poolFileUrl(id, batchId, index) {
+  return `${POOL_API}/pool/${encodeURIComponent(id)}/files/${encodeURIComponent(batchId)}/${index}`;
 }
 
 export function poolShareUrl(id) {

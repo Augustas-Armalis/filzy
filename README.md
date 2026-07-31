@@ -19,25 +19,12 @@ npm run preview
 
 The production build is written to `dist` and deployed to GitHub Pages by [the deployment workflow](.github/workflows/deploy.yml).
 
-## SwissTransfer companion
+## Drop and Pool
 
-Drop and Pool keep file bytes out of Filzy's cloud storage. The web interface
-streams selected files to a small companion on the same computer. The
-companion drives SwissTransfer's normal visible Link flow and removes its local
-temporary files after completion or cancellation.
-
-```bash
-npm install
-npm run companion
-```
-
-Open `http://127.0.0.1:47831` once and save the email address SwissTransfer
-should verify. Verification remains in SwissTransfer's own browser window.
-Leave the companion terminal open while creating Drop or Pool uploads.
-
-Filzy's Durable Object stores only short-link metadata: note, expiry,
-filenames, sizes, and the SwissTransfer transfer ID. It never stores the file
-bytes.
+Drop and Pool upload directly from the browser without a Filzy account, setup
+form, or local helper. Filzy's Durable Object stores only short-link metadata:
+note, expiry, filenames, sizes, and temporary download identifiers. It never
+stores file bytes.
 
 ## Routing and SEO
 
