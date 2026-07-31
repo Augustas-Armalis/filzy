@@ -1,3 +1,5 @@
+import { importWithRefresh } from "@/lib/chunkImport";
+
 const SOCIAL_HOSTS = new Map([
   ["tiktok.com", "TikTok"],
   ["instagram.com", "Instagram"],
@@ -320,7 +322,7 @@ export function findFormat(media, id) {
 
 export async function resolveMedia(source, options = {}) {
   if (!source) throw new Error("This source is not supported yet.");
-  const resolver = await import("@/lib/youtubeResolver");
+  const resolver = await importWithRefresh(() => import("@/lib/youtubeResolver"));
   if (source.id === "youtube") return resolver.resolveYouTube(source, options);
   if (["tiktok", "instagram", "facebook"].includes(source.id)) return resolver.resolveSocialMedia(source, options);
   throw new Error("This source is not supported yet.");

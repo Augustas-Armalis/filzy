@@ -1,17 +1,18 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/components/Shell";
+import { clearChunkRefreshQuery, importWithRefresh } from "@/lib/chunkImport";
 import Home from "@/pages/Home";
 import ReceivePage from "@/pages/ReceivePage";
 import DropReceivePage from "@/pages/DropReceivePage";
 import PoolPage from "@/pages/PoolPage";
 import NotFound from "@/pages/NotFound";
 
-const Convert = lazy(() => import("@/pages/Convert"));
-const Compress = lazy(() => import("@/pages/Compress"));
-const Extract = lazy(() => import("@/pages/Extract"));
-const Blog = lazy(() => import("@/pages/Blog"));
-const Guide = lazy(() => import("@/pages/Guide"));
+const Convert = lazy(() => importWithRefresh(() => import("@/pages/Convert")));
+const Compress = lazy(() => importWithRefresh(() => import("@/pages/Compress")));
+const Extract = lazy(() => importWithRefresh(() => import("@/pages/Extract")));
+const Blog = lazy(() => importWithRefresh(() => import("@/pages/Blog")));
+const Guide = lazy(() => importWithRefresh(() => import("@/pages/Guide")));
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -45,6 +46,8 @@ function AnimatedRoutes() {
 
 /* Persistent shell + clean URL routing with animated page and photo changes. */
 export default function App() {
+  useEffect(() => clearChunkRefreshQuery(), []);
+
   return (
     <BrowserRouter>
       <Shell>
