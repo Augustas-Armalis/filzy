@@ -3,6 +3,8 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/components/Shell";
 import Home from "@/pages/Home";
 import ReceivePage from "@/pages/ReceivePage";
+import SwissReceivePage from "@/pages/SwissReceivePage";
+import PoolPage from "@/pages/PoolPage";
 import NotFound from "@/pages/NotFound";
 
 const Convert = lazy(() => import("@/pages/Convert"));
@@ -22,6 +24,8 @@ function AnimatedRoutes() {
             <Route path="/" element={<Home />} />
             <Route path="/send/:intent" element={<Home />} />
             <Route path="/s/:id" element={<ReceivePage />} />
+            <Route path="/d/:transferId" element={<SwissReceivePage />} />
+            <Route path="/p/:poolId" element={<PoolPage />} />
             <Route path="/convert" element={<Convert />} />
             <Route path="/convert/:pair" element={<Convert />} />
             <Route path="/compress" element={<Compress />} />

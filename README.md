@@ -19,6 +19,26 @@ npm run preview
 
 The production build is written to `dist` and deployed to GitHub Pages by [the deployment workflow](.github/workflows/deploy.yml).
 
+## SwissTransfer companion
+
+Drop and Pool keep file bytes out of Filzy's cloud storage. The web interface
+streams selected files to a small companion on the same computer. The
+companion drives SwissTransfer's normal visible Link flow and removes its local
+temporary files after completion or cancellation.
+
+```bash
+npm install
+npm run companion
+```
+
+Open `http://127.0.0.1:47831` once and save the email address SwissTransfer
+should verify. Verification remains in SwissTransfer's own browser window.
+Leave the companion terminal open while creating Drop or Pool uploads.
+
+Filzy's Durable Object stores only short-link metadata: note, expiry,
+filenames, sizes, and the SwissTransfer transfer ID. It never stores the file
+bytes.
+
 ## Routing and SEO
 
 Filzy uses `BrowserRouter` and clean paths. The Vite build creates a real HTML entry point for every indexable landing page and guide, plus route-specific metadata, structured data, visible prerendered copy, a sitemap, an RSS feed, and a noindex 404 page.

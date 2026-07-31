@@ -10,6 +10,7 @@ dist-ssr
 
 # Vite cache
 .vite
+.wrangler
 
 # Logs
 logs
