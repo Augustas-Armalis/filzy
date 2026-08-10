@@ -18,4 +18,10 @@ describe("hosted transfer helpers", () => {
     await expect(startHostedTransfer({ items: [{ kind: "file", file: { name: "large.bin", size: 25 * 1024 ** 3 + 1 } }] }))
       .rejects.toThrow("up to 25 GB");
   });
+
+  it("rejects invalid burn-after-download limits before uploading", async () => {
+    const item = { kind: "file", file: new File(["one"], "one.txt") };
+    await expect(startHostedTransfer({ items: [item], maxDownloads: 1001 }))
+      .rejects.toThrow("between 1 and 1000");
+  });
 });

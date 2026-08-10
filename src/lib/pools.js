@@ -22,19 +22,24 @@ async function poolRequest(path, options = {}) {
   return payload;
 }
 
-export async function createPool({ name, expiresInDays }) {
+export async function createPool({ name, expiresInDays, password = "", maxDownloads = 0 }) {
   const id = token(12);
   const ownerSecret = token(24);
   const pool = await poolRequest(`/pool/${id}/init`, {
     method: "POST",
-    body: JSON.stringify({ name, expiresInDays, ownerSecret }),
+    body: JSON.stringify({ name, expiresInDays, ownerSecret, password, maxDownloads }),
   });
   localStorage.setItem(`filzy-pool-owner:${id}`, ownerSecret);
   return { id, ownerSecret, pool };
 }
 
-export function getPool(id) {
-  return poolRequest(`/pool/${encodeURIComponent(id)}`);
+export function getPool(id, accessToken = "") {
+  const query = accessToken ? `?access=${encodeURIComponent(accessToken)}` : "";
+  return poolRequest(`/pool/${encodeURIComponent(id)}${query}`);
+}
+
+export function unlockPool(id, password) {
+  return poolRequest(`/pool/${encodeURIComponent(id)}/unlock`, { method: "POST", body: JSON.stringify({ password }) });
 }
 
 export function closePool(id, ownerSecret) {
@@ -50,8 +55,9 @@ export function addPoolTransfer(id, transfer, items) {
   });
 }
 
-export function poolFileUrl(id, batchId, index) {
-  return `${POOL_API}/pool/${encodeURIComponent(id)}/files/${encodeURIComponent(batchId)}/${index}`;
+export function poolFileUrl(id, batchId, index, accessToken = "") {
+  const query = accessToken ? `?access=${encodeURIComponent(accessToken)}` : "";
+  return `${POOL_API}/pool/${encodeURIComponent(id)}/files/${encodeURIComponent(batchId)}/${index}${query}`;
 }
 
 export function poolShareUrl(id) {

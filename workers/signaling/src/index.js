@@ -25,7 +25,7 @@ export default {
       return cors(json({ ok: true, service: "filzy-signaling" }));
     }
     if (url.pathname === "/turn") return cors(await turnCreds(env));
-    if (url.pathname.startsWith("/transfer/")) return cors(await proxyTransferApi(request, url));
+    if (url.pathname.startsWith("/transfer/")) return cors(await proxyTransferApi(request, url, env));
 
     const poolMatch = url.pathname.match(/^\/pool\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
     if (poolMatch) {
@@ -118,13 +118,14 @@ export class BeamRoom {
 
   async poolRequest(request, url) {
     const fileMatch = url.pathname.match(/^\/pool\/[^/]+\/files\/([A-Za-z0-9_-]+)\/(\d+)$/);
-    const action = (url.pathname.match(/^\/pool\/[^/]+(?:\/(init|batches|close))?$/) || [])[1] || "read";
+    const action = (url.pathname.match(/^\/pool\/[^/]+(?:\/(init|batches|close|unlock))?$/) || [])[1] || "read";
     const state = await this.ctx.storage.get("pool");
     if (["GET", "HEAD"].includes(request.method) && fileMatch) {
       if (!state) return poolJson({ error: "Pool not found." }, 404);
       if (state.expiresAt <= Date.now()) return poolJson({ error: "This pool has expired." }, 410);
       const batch = state.batches.find((candidate) => candidate.id === fileMatch[1]);
       if (!batch) return poolJson({ error: "File not found." }, 404);
+      if (!await transferAccessAllowed(state, url.searchParams.get("access"))) return poolJson({ error: "Password required." }, 401);
       return proxyTransferFile(request, batch.access, Number(fileMatch[2]), batch.files);
     }
     if (request.method === "GET" && action === "read") {
@@ -133,7 +134,7 @@ export class BeamRoom {
         await this.ctx.storage.deleteAll();
         return poolJson({ error: "This pool has expired." }, 410);
       }
-      return poolJson(publicPool(state));
+      return poolJson(publicPool(state, await transferAccessAllowed(state, url.searchParams.get("access"))));
     }
 
     if (request.method !== "POST") return poolJson({ error: "Method not allowed." }, 405);
@@ -143,27 +144,37 @@ export class BeamRoom {
     if (action === "init") {
       if (state) return poolJson({ error: "Pool already exists." }, 409);
       const days = Number(body.expiresInDays);
-      if (![1, 7, 15, 30].includes(days) || !validSecret(body.ownerSecret)) return poolJson({ error: "Invalid pool settings." }, 400);
+      const password = cleanPassword(body.password);
+      if (![1, 7].includes(days) || !validSecret(body.ownerSecret) || password === null) return poolJson({ error: "Invalid pool settings." }, 400);
+      const accessToken = password ? randomSecret() : "";
       const pool = {
         name: cleanPoolText(body.name, 80) || "Shared pool",
         ownerHash: await hashSecret(body.ownerSecret),
         createdAt: Date.now(),
         expiresAt: Date.now() + days * 24 * 60 * 60 * 1000,
         closed: false,
+        passwordHash: password ? await hashSecret(password) : "",
+        accessToken,
+        accessHash: accessToken ? await hashSecret(accessToken) : "",
+        maxDownloads: cleanMaxDownloads(body.maxDownloads),
         batches: [],
       };
       await this.ctx.storage.put("pool", pool);
       await this.ctx.storage.setAlarm(pool.expiresAt);
-      return poolJson(publicPool(pool), 201);
+      return poolJson(publicPool(pool, true), 201);
     }
 
     if (!state) return poolJson({ error: "Pool not found." }, 404);
     if (state.expiresAt <= Date.now()) return poolJson({ error: "This pool has expired." }, 410);
+    if (action === "unlock") {
+      if (!state.passwordHash || await hashSecret(String(body.password || "")) !== state.passwordHash) return poolJson({ error: "Incorrect password." }, 401);
+      return poolJson({ ...publicPool(state, true), accessToken: state.accessToken });
+    }
     if (action === "close") {
       if (!validSecret(body.ownerSecret) || await hashSecret(body.ownerSecret) !== state.ownerHash) return poolJson({ error: "Only the pool owner can close it." }, 403);
       state.closed = true;
       await this.ctx.storage.put("pool", state);
-      return poolJson(publicPool(state));
+      return poolJson(publicPool(state, true));
     }
     if (action === "batches") {
       if (state.closed) return poolJson({ error: "This pool is closed." }, 409);
@@ -175,7 +186,7 @@ export class BeamRoom {
       })) : [];
       const access = cleanTransferAccess(body.access, files);
       if (!/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1 || !access) return poolJson({ error: "Invalid transfer metadata." }, 400);
-      if (state.batches.some((batch) => batch.transferId === transferId)) return poolJson(publicPool(state));
+      if (state.batches.some((batch) => batch.transferId === transferId)) return poolJson(publicPool(state, true));
       state.batches.push({
         id: crypto.randomUUID(),
         transferId,
@@ -185,7 +196,7 @@ export class BeamRoom {
       });
       state.batches = state.batches.slice(-100);
       await this.ctx.storage.put("pool", state);
-      return poolJson(publicPool(state), 201);
+      return poolJson(publicPool(state, true), 201);
     }
     return poolJson({ error: "Not found." }, 404);
   }
@@ -196,6 +207,7 @@ export class BeamRoom {
     if (["GET", "HEAD"].includes(request.method) && fileMatch) {
       if (!state) return poolJson({ error: "Transfer not found." }, 404);
       if (state.expiresAt <= Date.now()) return poolJson({ error: "This transfer has expired." }, 410);
+      if (!await transferAccessAllowed(state, url.searchParams.get("access"))) return poolJson({ error: "Password required." }, 401);
       return proxyTransferFile(request, state.access, Number(fileMatch[1]), state.files);
     }
     if (request.method === "GET") {
@@ -204,11 +216,16 @@ export class BeamRoom {
         await this.ctx.storage.deleteAll();
         return poolJson({ error: "This transfer has expired." }, 410);
       }
-      return poolJson(publicDrop(state));
+      return poolJson(publicDrop(state, await transferAccessAllowed(state, url.searchParams.get("access"))));
     }
     if (request.method !== "POST") return poolJson({ error: "Method not allowed." }, 405);
-    if (state) return poolJson({ error: "Transfer already exists." }, 409);
     const body = await safePoolJson(request);
+    if (url.pathname.endsWith("/unlock")) {
+      if (!state) return poolJson({ error: "Transfer not found." }, 404);
+      if (!state.passwordHash || await hashSecret(String(body?.password || "")) !== state.passwordHash) return poolJson({ error: "Incorrect password." }, 401);
+      return poolJson({ ...publicDrop(state, true), accessToken: state.accessToken });
+    }
+    if (state) return poolJson({ error: "Transfer already exists." }, 409);
     const days = Number(body?.expiresInDays);
     const transferId = String(body?.transferId || "");
     const files = Array.isArray(body?.files) ? body.files.slice(0, 500).map((file) => ({
@@ -217,20 +234,26 @@ export class BeamRoom {
       kind: cleanPoolText(file?.kind, 80),
     })) : [];
     const access = cleanTransferAccess(body?.access, files);
-    if (![1, 7, 15, 30].includes(days) || !/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1 || !access) {
+    const password = cleanPassword(body?.password);
+    if (![1, 7].includes(days) || password === null || !/^[A-Za-z0-9_-]+$/.test(transferId) || files.length < 1 || !access) {
       return poolJson({ error: "Invalid transfer metadata." }, 400);
     }
+    const accessToken = password ? randomSecret() : "";
     const drop = {
       note: cleanPoolText(body.note, 100),
       transferId,
       files,
       access,
+      passwordHash: password ? await hashSecret(password) : "",
+      accessToken,
+      accessHash: accessToken ? await hashSecret(accessToken) : "",
+      maxDownloads: cleanMaxDownloads(body?.maxDownloads),
       createdAt: Date.now(),
       expiresAt: Date.now() + days * 24 * 60 * 60 * 1000,
     };
     await this.ctx.storage.put("drop", drop);
     await this.ctx.storage.setAlarm(drop.expiresAt);
-    return poolJson(publicDrop(drop), 201);
+    return poolJson(publicDrop(drop, true), 201);
   }
 
   async alarm() {
@@ -306,6 +329,26 @@ function cleanPoolText(value, max) {
   return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
 }
 
+function cleanPassword(value) {
+  const password = String(value || "");
+  if (!password) return "";
+  return password.length >= 4 && password.length <= 100 ? password : null;
+}
+
+function cleanMaxDownloads(value) {
+  const count = Number(value || 0);
+  return Number.isInteger(count) && count >= 1 && count <= 1000 ? count : 0;
+}
+
+function randomSecret() {
+  return crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+}
+
+async function transferAccessAllowed(state, token) {
+  if (!state?.passwordHash) return true;
+  return Boolean(token) && await hashSecret(String(token)) === state.accessHash;
+}
+
 async function safePoolJson(request) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > 512 * 1024) return null;
@@ -322,19 +365,24 @@ async function hashSecret(value) {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function publicPool(pool) {
+function publicPool(pool, unlocked = false) {
   return {
     name: pool.name,
     createdAt: pool.createdAt,
     expiresAt: pool.expiresAt,
     closed: pool.closed,
-    batches: pool.batches.map(({ access, ...batch }) => batch),
+    locked: Boolean(pool.passwordHash) && !unlocked,
+    maxDownloads: pool.maxDownloads || 0,
+    batches: unlocked || !pool.passwordHash ? pool.batches.map(({ access, ...batch }) => batch) : [],
   };
 }
 
-function publicDrop(drop) {
-  const { access, ...value } = drop;
-  return value;
+function publicDrop(drop, unlocked = false) {
+  const { access, passwordHash, accessToken, accessHash, ...value } = drop;
+  if (passwordHash && !unlocked) {
+    return { note: value.note, createdAt: value.createdAt, expiresAt: value.expiresAt, locked: true, files: [] };
+  }
+  return { ...value, locked: false };
 }
 
 function cleanTransferAccess(value, files) {
@@ -387,21 +435,34 @@ async function proxyTransferFile(request, access, index, files) {
 const TRANSFER_API_ROUTES = [
   ["POST", /^\/transfer\/upload\/(?:init|parts|complete-multipart|abort|confirm)$/],
   ["POST", /^\/transfer\/collection$/],
-  ["POST", /^\/transfer\/collection\/[A-Za-z0-9_-]{9,24}\/(?:ready|expiry)$/],
+  ["POST", /^\/transfer\/collection\/[A-Za-z0-9_-]{9,24}\/(?:ready|expiry|max-downloads)$/],
   ["DELETE", /^\/transfer\/collection\/[A-Za-z0-9_-]{9,24}$/],
-  ["POST", /^\/transfer\/file\/[A-Za-z0-9_-]{9,24}\/expiry$/],
+  ["POST", /^\/transfer\/file\/[A-Za-z0-9_-]{9,24}\/(?:expiry|max-downloads)$/],
 ];
 
-async function proxyTransferApi(request, url) {
+async function proxyTransferApi(request, url, env) {
   if (!TRANSFER_API_ROUTES.some(([method, pattern]) => request.method === method && pattern.test(url.pathname))) {
     return poolJson({ success: false, error: "Not found." }, 404);
   }
   const length = Number(request.headers.get("content-length") || 0);
   if (length > 128 * 1024) return poolJson({ success: false, error: "Request too large." }, 413);
-  const headers = new Headers({ "content-type": "application/json" });
+  const headers = new Headers({
+    "content-type": "application/json",
+    "accept": "application/json",
+    // storage.to's edge security rejects the default server-side fetch user
+    // agent on upload initialization. Identify this documented API client.
+    "user-agent": "Filzy/1.0 (+https://filzy.site)",
+  });
   for (const name of ["x-visitor-token", "authorization", "x-owner-token"]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
+  }
+  // Authenticated control calls avoid anonymous shared-egress blocking while
+  // the browser still uploads file bytes straight to the presigned R2 URL.
+  if (env.STORAGE_TO_TOKEN) {
+    const owner = request.headers.get("authorization");
+    if (owner?.startsWith("Owner ")) headers.set("x-owner-token", owner.slice(6));
+    headers.set("authorization", `Bearer ${env.STORAGE_TO_TOKEN}`);
   }
   let response;
   try {

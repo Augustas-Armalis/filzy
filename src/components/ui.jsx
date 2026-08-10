@@ -13,35 +13,22 @@ import { swap } from "@/lib/motion";
 */
 
 // ---------------------------------------------------------------------------
-// GlassCard — the floating white/50 glass panel, with a smoothly animated
-// height as its content grows/shrinks (same trick Home.jsx uses).
+// GlassCard — the floating white/50 glass panel. Framer's layout animation is
+// deliberately used instead of measuring and assigning a numeric height: an
+// interrupted exit could otherwise leave a card stuck at a 1px measured height.
 // ---------------------------------------------------------------------------
 export function GlassCard({ children, className, animateHeight = true, width = "max-w-[400px]" }) {
-  const innerRef = useRef(null);
-  const [height, setHeight] = useState();
-
-  useLayoutEffect(() => {
-    if (!animateHeight) return;
-    const el = innerRef.current;
-    if (!el) return;
-    const measure = () => setHeight(el.offsetHeight + 2); // +2 for the border
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [animateHeight]);
-
   return (
     <motion.div
-      animate={animateHeight ? { height: height ?? "auto" } : undefined}
-      transition={{ duration: 0.3, ease: "easeOut" }}
+      layout={animateHeight ? "size" : false}
+      transition={{ layout: { duration: 0.3, ease: "easeOut" } }}
       className={cn(
         "glass-surface w-full overflow-hidden rounded-2xl border border-white/30 bg-white/55",
         width,
         className,
       )}
     >
-      <div ref={innerRef} className="flex flex-col gap-[8px] p-[8px]">
+      <div className="flex flex-col gap-[8px] p-[8px]">
         {children}
       </div>
     </motion.div>

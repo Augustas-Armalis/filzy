@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, File, Link as LinkIcon, Plus, QrCode, WavesLadder, X } from "lucide-react";
+import { Download, File, Link as LinkIcon, LockKeyhole, Plus, QrCode, WavesLadder, X } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { TransferLoading, TransferProgress } from "@/components/TransferUI";
 import { QRCode } from "@/components/QRCode";
 import { CtaButton, StackIcon } from "@/components/ui";
 import { formatBytes, kindOf } from "@/lib/files";
-import { addPoolTransfer, closePool, getPool, ownerSecretForPool, poolFileUrl, poolShareUrl } from "@/lib/pools";
+import { addPoolTransfer, closePool, getPool, ownerSecretForPool, poolFileUrl, poolShareUrl, unlockPool } from "@/lib/pools";
 import { cancelTransferJob, startHostedTransfer, waitForHostedTransfer } from "@/lib/transferCompanion";
 import { useSeo } from "@/lib/seo";
 
@@ -42,6 +42,8 @@ export default function PoolPage() {
   const [error, setError] = useState("");
   const [transfer, setTransfer] = useState({});
   const [showQr, setShowQr] = useState(false);
+  const [password, setPassword] = useState("");
+  const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem(`filzy-pool-access:${poolId}`) || "");
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const ownerSecret = ownerSecretForPool(poolId);
@@ -50,7 +52,7 @@ export default function PoolPage() {
   useSeo({ title: pool?.name ? `${pool.name} | Filzy Pool` : "Shared Filzy Pool", description: "Add and download files in a shared Filzy pool.", path: `/p/${poolId}`, robots: "noindex, nofollow" });
 
   const refresh = async () => {
-    try { const next = await getPool(poolId); setPool(next); setError(""); setPhase((value) => value === "loading" ? "ready" : value); }
+    try { const next = await getPool(poolId, accessToken); setPool(next); setError(""); setPhase((value) => value === "loading" ? "ready" : value); }
     catch (cause) { setError(cause?.message || "This pool is unavailable."); setPhase("error"); }
   };
 
@@ -58,7 +60,18 @@ export default function PoolPage() {
     void refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => { window.clearInterval(timer); abortRef.current?.abort(); };
-  }, [poolId]);
+  }, [poolId, accessToken]);
+
+  const unlock = async () => {
+    try {
+      const next = await unlockPool(poolId, password);
+      sessionStorage.setItem(`filzy-pool-access:${poolId}`, next.accessToken);
+      setAccessToken(next.accessToken);
+      setPool(next);
+      setPassword("");
+      setError("");
+    } catch (cause) { setError(cause?.message || "Incorrect password."); }
+  };
 
   const upload = async (event) => {
     const files = Array.from(event.target.files || []);
@@ -74,6 +87,7 @@ export default function PoolPage() {
       const started = await startHostedTransfer({
         items,
         expiresInDays: supportedExpiry,
+        maxDownloads: pool.maxDownloads || 0,
         title: pool.name,
         signal: controller.signal,
         onProgress: (localProgress) => setTransfer((value) => ({ ...value, localProgress })),
@@ -102,18 +116,25 @@ export default function PoolPage() {
 
   const batches = pool?.batches || [];
   const files = batches.flatMap((batch) => batch.files.map((file, fileIndex) => ({ ...file, batchId: batch.id, fileIndex })));
-  const downloadAll = () => triggerDownloads(files.map((file) => poolFileUrl(poolId, file.batchId, file.fileIndex)));
+  const downloadAll = () => triggerDownloads(files.map((file) => poolFileUrl(poolId, file.batchId, file.fileIndex, accessToken)));
 
   return (
     <div className="flex min-h-[100svh] items-center justify-center px-[10px] pb-[44px] pt-[60px] [&>*]:pointer-events-auto lg:justify-start lg:p-0 lg:pl-32">
       <AnimatePresence mode="wait">
         {phase === "uploading" ? (
           <motion.div key="uploading" initial={{ opacity: 0, filter: "blur(10px)" }} animate={{ opacity: 1, filter: "blur(0px)" }} exit={{ opacity: 0, filter: "blur(10px)" }} className="glass-surface w-full max-w-[280px] rounded-2xl border border-white/30 bg-white/55 p-[8px]"><TransferProgress state={transfer.state} localProgress={transfer.localProgress} transferProgress={transfer.transferProgress} error={transfer.error} onCancel={cancel} onRetry={() => inputRef.current?.click()} /></motion.div>
+        ) : pool?.locked ? (
+          <motion.div key="locked" initial={{ opacity: 0, filter: "blur(10px)" }} animate={{ opacity: 1, filter: "blur(0px)" }} className="glass-surface flex w-full max-w-[280px] flex-col gap-[8px] rounded-2xl border border-white/30 bg-white/55 p-[8px]">
+            <div className="flex min-h-[112px] flex-col items-center justify-center gap-[8px] rounded-[12px] border border-border bg-bg px-[18px] text-center"><StackIcon Icon={LockKeyhole} /><div><p className="text-[14px] text-text">Password required</p><p className="text-[11px] text-alt-text">Enter it to open this pool.</p></div></div>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && password.length >= 4 && void unlock()} placeholder="Password" autoFocus className="h-[38px] rounded-[11px] border border-border bg-white px-[11px] text-[13px] text-text outline-none placeholder:text-dalt-text focus:border-text/50" />
+            {error && <p className="px-[4px] text-center text-[11px] text-red-600">{error}</p>}
+            <CtaButton label="Open pool" disabled={password.length < 4} onClick={unlock} />
+          </motion.div>
         ) : pool ? (
           <motion.div key="pool" initial={{ opacity: 0, filter: "blur(10px)" }} animate={{ opacity: 1, filter: "blur(0px)" }} className="glass-surface flex w-full max-w-[280px] flex-col gap-[8px] rounded-2xl border border-white/30 bg-white/55 p-[8px]">
             <div className="flex min-h-[104px] flex-col items-center justify-center gap-[8px] rounded-[12px] border border-border bg-bg px-[14px] text-center"><StackIcon Icon={WavesLadder} /><div><p className="text-[14px] text-text">{pool.name}</p><p className="text-[11px] text-alt-text">{pool.closed ? "This pool is closed." : `${daysLeft(pool.expiresAt)} day${daysLeft(pool.expiresAt) === 1 ? "" : "s"} left · ${files.length} file${files.length === 1 ? "" : "s"}`}</p></div></div>
             {!pool.closed && <button type="button" onClick={() => inputRef.current?.click()} className="flex h-[72px] w-full cursor-pointer flex-col items-center justify-center gap-[5px] rounded-[12px] border border-dashed border-border bg-bg text-alt-text transition-colors hover:bg-bg-hover"><Plus size={18} strokeWidth={1.17} absoluteStrokeWidth /><span className="text-[13px]">Add files</span></button>}
-            {files.length > 0 && <div className="flex max-h-[300px] flex-col gap-[4px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{files.map((file) => <PoolFile key={`${file.batchId}-${file.fileIndex}`} file={file} href={poolFileUrl(poolId, file.batchId, file.fileIndex)} />)}</div>}
+            {files.length > 0 && <div className="flex max-h-[300px] flex-col gap-[4px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{files.map((file) => <PoolFile key={`${file.batchId}-${file.fileIndex}`} file={file} href={poolFileUrl(poolId, file.batchId, file.fileIndex, accessToken)} />)}</div>}
             {error && <p className="px-[4px] text-center text-[11px] text-red-600">{error}</p>}
             <div className="flex gap-[4px]">
               <CtaButton label={files.length ? "Download all" : "Copy link"} onClick={files.length ? downloadAll : () => navigator.clipboard.writeText(shareUrl)} />

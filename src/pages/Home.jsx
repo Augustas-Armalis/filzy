@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Cloud, Plus, Radio, WavesLadder } from "lucide-react";
+import { Cloud, Plus, Radio, Settings2, WavesLadder } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { DropBox, FileList } from "@/components/BeamUpload";
 import { Streaming, StreamStopped } from "@/components/Streaming";
-import { ExpirySelect, TransferFileList, TransferProgress, TransferSuccess } from "@/components/TransferUI";
+import { ExpirySelect, TransferAdvancedSettings, TransferFileList, TransferProgress, TransferSuccess } from "@/components/TransferUI";
 import { CtaButton, Dropzone, TabBar } from "@/components/ui";
 import { basePages, seoPageForPath } from "@/content/seoCatalog";
 import { useBeamHost } from "@/hooks/useBeamHost";
@@ -54,12 +54,13 @@ export default function Home() {
   const [note, setNote] = useState("");
   const [poolName, setPoolName] = useState("");
   const [expiry, setExpiry] = useState(7);
+  const [password, setPassword] = useState("");
+  const [maxDownloads, setMaxDownloads] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [cardHeight, setCardHeight] = useState();
   const [transfer, setTransfer] = useState({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
   const dragDepth = useRef(0);
   const inputRef = useRef(null);
-  const innerRef = useRef(null);
   const abortRef = useRef(null);
   const beam = useBeamHost();
   const phaseRef = useRef(phase);
@@ -82,16 +83,6 @@ export default function Home() {
     if (item && phaseRef.current === "live") beam.removeItem(item);
     return current.filter((candidate) => candidate.id !== id);
   });
-
-  useLayoutEffect(() => {
-    const element = innerRef.current;
-    if (!element) return undefined;
-    const measure = () => setCardHeight(element.offsetHeight + 2);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => () => {
     abortRef.current?.abort();
@@ -128,6 +119,7 @@ export default function Home() {
       const started = await startHostedTransfer({
         items,
         expiresInDays: expiry,
+        maxDownloads,
         message: note,
         signal: controller.signal,
         onProgress: (localProgress) => setTransfer((value) => ({ ...value, localProgress })),
@@ -138,7 +130,7 @@ export default function Home() {
         signal: controller.signal,
         onState: (job) => setTransfer((value) => ({ ...value, ...job, jobId: job.id })),
       });
-      const share = await createDropShare({ transfer: complete, items, note, expiresInDays: expiry });
+      const share = await createDropShare({ transfer: complete, items, note, expiresInDays: expiry, password, maxDownloads });
       setTransfer((value) => ({ ...value, ...complete, shareUrl: share.shareUrl }));
       setPhase("transfer-success");
     } catch (error) {
@@ -153,7 +145,7 @@ export default function Home() {
     setPhase("transfer");
     setTransfer({ state: "opening", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
     try {
-      const created = await createPool({ name: poolName, expiresInDays: expiry });
+      const created = await createPool({ name: poolName, expiresInDays: expiry, password, maxDownloads });
       const shareUrl = poolShareUrl(created.id);
       if (!hasFiles) {
         setTransfer((value) => ({ ...value, state: "complete", shareUrl, poolId: created.id }));
@@ -164,6 +156,7 @@ export default function Home() {
       const started = await startHostedTransfer({
         items,
         expiresInDays: expiry,
+        maxDownloads,
         title: poolName || "Filzy pool upload",
         signal: controller.signal,
         onProgress: (localProgress) => setTransfer((value) => ({ ...value, localProgress })),
@@ -191,7 +184,7 @@ export default function Home() {
 
   const reset = () => {
     items.forEach((item) => item.url && URL.revokeObjectURL(item.url));
-    setItems([]); setNote(""); setPoolName(""); setPhase("upload");
+    setItems([]); setNote(""); setPoolName(""); setPassword(""); setMaxDownloads(0); setSettingsOpen(false); setPhase("upload");
     setTransfer({ state: "", localProgress: 0, transferProgress: 0, error: "", jobId: "", shareUrl: "" });
   };
 
@@ -203,8 +196,8 @@ export default function Home() {
 
   const uploadCard = (
     <motion.div key="upload" {...phaseSwap} className="w-full max-w-[280px]">
-      <motion.div animate={{ height: cardHeight ?? "auto" }} transition={{ duration: 0.3, ease: "easeOut" }} className="glass-surface w-full overflow-hidden rounded-2xl border border-white/30 bg-white/55">
-        <div ref={innerRef} className="flex flex-col gap-[8px] p-[8px]">
+      <motion.div layout="size" transition={{ layout: { duration: 0.3, ease: "easeOut" } }} className="glass-surface w-full overflow-hidden rounded-2xl border border-white/30 bg-white/55">
+        <div className="flex flex-col gap-[8px] p-[8px]">
           {!hasFiles ? (
             <motion.div key="empty" {...phaseSwap} className="flex flex-col gap-[8px]">
               <TabBar tabs={TABS} activeId={activeId} onChange={setActiveId} />
@@ -227,7 +220,13 @@ export default function Home() {
           {activeId === "pool" && !hasFiles && (
             <div className="flex gap-[4px]"><ExpirySelect value={expiry} onChange={setExpiry} /><input value={poolName} onChange={(event) => setPoolName(event.target.value)} placeholder="Pool name…" className="h-[36px] min-w-0 flex-1 rounded-[10px] border border-border bg-white px-[10px] text-[13px] text-text outline-none placeholder:text-dalt-text focus:border-text/50" /></div>
           )}
-          <CtaButton label={activeId === "beam" ? "Start streaming" : activeId === "pool" ? "Start a pool" : "Get a link"} disabled={activeId !== "pool" && !hasFiles} onClick={startCurrent} />
+          <AnimatePresence initial={false}>
+            {activeId !== "beam" && settingsOpen && <TransferAdvancedSettings password={password} setPassword={setPassword} maxDownloads={maxDownloads} setMaxDownloads={setMaxDownloads} />}
+          </AnimatePresence>
+          <div className="flex gap-[4px]">
+            <CtaButton label={activeId === "beam" ? "Start streaming" : activeId === "pool" ? "Start a pool" : "Get a link"} disabled={activeId !== "pool" && !hasFiles || Boolean(password) && password.length < 4} onClick={startCurrent} />
+            {activeId !== "beam" && <button type="button" aria-label="Transfer settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)} className="flex h-[38px] w-[38px] shrink-0 cursor-pointer items-center justify-center rounded-[11px] border border-border bg-white text-text transition-colors hover:bg-white-hover"><Settings2 size={16} strokeWidth={1.17} absoluteStrokeWidth /></button>}
+          </div>
         </div>
       </motion.div>
     </motion.div>

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, ChevronDown, Download, Link as LinkIcon, LoaderCircle, PartyPopper, Plus, QrCode, UploadCloud, WavesLadder, X } from "lucide-react";
+import { CalendarDays, ChevronDown, Download, KeyRound, Link as LinkIcon, LoaderCircle, PartyPopper, Plus, QrCode, UploadCloud, WavesLadder, X } from "lucide-react";
 import { Row } from "@/components/BeamUpload";
 import { QRCode } from "@/components/QRCode";
 import { CtaButton, ProgressBar, StackIcon } from "@/components/ui";
@@ -82,6 +82,47 @@ export function TransferFileList({ items, onRemove, onOpen, mode, note, setNote,
   );
 }
 
+export function TransferAdvancedSettings({ password, setPassword, maxDownloads, setMaxDownloads }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0, filter: "blur(8px)" }}
+      animate={{ opacity: 1, height: "auto", filter: "blur(0px)" }}
+      exit={{ opacity: 0, height: 0, filter: "blur(8px)" }}
+      className="overflow-hidden"
+    >
+      <div className="flex flex-col gap-[4px] rounded-[12px] border border-border bg-bg p-[6px]">
+        <div className="relative">
+          <KeyRound size={14} strokeWidth={1.17} absoluteStrokeWidth className="pointer-events-none absolute left-[10px] top-[11px] text-alt-text" />
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password (optional)"
+            minLength={4}
+            maxLength={100}
+            className="h-[36px] w-full rounded-[10px] border border-border bg-white pl-[31px] pr-[10px] text-[13px] text-text outline-none placeholder:text-dalt-text focus:border-text/50"
+          />
+        </div>
+        <div className="relative">
+          <select
+            aria-label="Automatic deletion after downloads"
+            value={maxDownloads}
+            onChange={(event) => setMaxDownloads(Number(event.target.value))}
+            className="h-[36px] w-full cursor-pointer appearance-none rounded-[10px] border border-border bg-white px-[10px] pr-[28px] text-[13px] text-text outline-none transition-colors hover:bg-white-hover focus:border-text/50"
+          >
+            <option value={0}>Keep until expiry</option>
+            <option value={1}>Delete after 1 download</option>
+            <option value={5}>Delete after 5 downloads</option>
+            <option value={10}>Delete after 10 downloads</option>
+            <option value={50}>Delete after 50 downloads</option>
+          </select>
+          <ChevronDown size={14} strokeWidth={1.17} absoluteStrokeWidth className="pointer-events-none absolute right-[9px] top-[11px] text-alt-text" />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export function TransferProgress({ state, localProgress, transferProgress, error, onCancel, onRetry }) {
   const staging = ["receiving", "staging", "opening", "loading-files"].includes(state);
   const value = Math.max(localProgress || 0, transferProgress || 0);
@@ -147,9 +188,9 @@ export function TransferSuccess({ shareUrl, pool = false, onReset }) {
   );
 }
 
-export function DropReceiveCard({ share }) {
+export function DropReceiveCard({ share, accessToken = "" }) {
   const days = Math.max(0, Math.ceil((share.expiresAt - Date.now()) / (24 * 60 * 60 * 1000)));
-  const urls = share.files.map((_, index) => dropFileUrl(share.id, index));
+  const urls = share.files.map((_, index) => dropFileUrl(share.id, index, accessToken));
   const downloadAll = () => urls.forEach((url) => {
     const link = document.createElement("a");
     link.href = url;

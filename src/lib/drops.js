@@ -19,23 +19,29 @@ async function request(path, options = {}) {
   return payload;
 }
 
-export async function createDropShare({ transfer, items, note, expiresInDays }) {
+export async function createDropShare({ transfer, items, note, expiresInDays, password = "", maxDownloads = 0 }) {
   const id = shortId();
   const transferId = hostedTransferId(transfer.transferUrl);
   const files = flattenTransferItems(items).map((file) => ({ name: file.name, size: file.size, kind: file.type || "file" }));
   await request(`/drop/${id}/init`, {
     method: "POST",
-    body: JSON.stringify({ transferId, files, access: transfer.access, note, expiresInDays }),
+    body: JSON.stringify({ transferId, files, access: transfer.access, note, expiresInDays, password, maxDownloads }),
   });
   return { id, shareUrl: `${window.location.origin}/d/${id}` };
 }
 
-export function getDropShare(id) {
-  return request(`/drop/${encodeURIComponent(id)}`);
+export function getDropShare(id, accessToken = "") {
+  const query = accessToken ? `?access=${encodeURIComponent(accessToken)}` : "";
+  return request(`/drop/${encodeURIComponent(id)}${query}`);
 }
 
-export function dropFileUrl(id, index) {
-  return `${DROP_API}/drop/${encodeURIComponent(id)}/files/${index}`;
+export function unlockDropShare(id, password) {
+  return request(`/drop/${encodeURIComponent(id)}/unlock`, { method: "POST", body: JSON.stringify({ password }) });
+}
+
+export function dropFileUrl(id, index, accessToken = "") {
+  const query = accessToken ? `?access=${encodeURIComponent(accessToken)}` : "";
+  return `${DROP_API}/drop/${encodeURIComponent(id)}/files/${index}${query}`;
 }
 
 export { DROP_API };

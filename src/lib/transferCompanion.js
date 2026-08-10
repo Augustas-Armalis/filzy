@@ -111,7 +111,7 @@ async function multipartUrls(upload, partNumbers, { visitor, signal }) {
   return initial;
 }
 
-async function uploadFile(file, { collectionId, expiresInDays, visitor, signal, onProgress }) {
+async function uploadFile(file, { collectionId, expiresInDays, maxDownloads, visitor, signal, onProgress }) {
   const upload = await apiRequest("/upload/init", {
     visitor,
     signal,
@@ -169,6 +169,14 @@ async function uploadFile(file, { collectionId, expiresInDays, visitor, signal, 
       signal,
       body: { days: expiresInDays },
     });
+    if (maxDownloads) {
+      await apiRequest(`/file/${encodeURIComponent(confirmed.file.id)}/max-downloads`, {
+        visitor,
+        owner: confirmed.owner_token,
+        signal,
+        body: { max_downloads: maxDownloads },
+      });
+    }
     return confirmed.file;
   } catch (error) {
     if (upload.type === "multipart" && upload.upload_id) {
@@ -197,13 +205,16 @@ export function flattenTransferItems(items) {
   return items.flatMap((item) => item.kind === "folder" ? item.files : [item.file]).filter(Boolean);
 }
 
-export async function startHostedTransfer({ items, expiresInDays = 7, onProgress, onState, signal }) {
+export async function startHostedTransfer({ items, expiresInDays = 7, maxDownloads = 0, onProgress, onState, signal }) {
   const files = flattenTransferItems(items);
   if (!files.length) throw new TransferError("Add at least one file first.");
   if (files.length > MAX_TRANSFER_FILES) throw new TransferError(`Choose up to ${MAX_TRANSFER_FILES} files per transfer.`);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes > MAX_TRANSFER_BYTES) throw new TransferError("A transfer can contain up to 25 GB.");
   if (![1, 7].includes(Number(expiresInDays))) throw new TransferError("Choose a 1 or 7 day expiry.");
+  if (maxDownloads && (!Number.isInteger(Number(maxDownloads)) || Number(maxDownloads) < 1 || Number(maxDownloads) > 1000)) {
+    throw new TransferError("Choose a download limit between 1 and 1000.");
+  }
 
   const id = randomJobId();
   const controller = new AbortController();
@@ -230,6 +241,14 @@ export async function startHostedTransfer({ items, expiresInDays = 7, onProgress
       signal: controller.signal,
       body: { days: Number(expiresInDays) },
     });
+    if (maxDownloads) {
+      await apiRequest(`/collection/${encodeURIComponent(collection.collection.id)}/max-downloads`, {
+        visitor,
+        owner: collection.owner_token,
+        signal: controller.signal,
+        body: { max_downloads: Number(maxDownloads) },
+      });
+    }
 
     let completedBytes = 0;
     const uploadedFiles = [];
@@ -237,6 +256,7 @@ export async function startHostedTransfer({ items, expiresInDays = 7, onProgress
       const uploaded = await uploadFile(file, {
         collectionId: collection.collection.id,
         expiresInDays: Number(expiresInDays),
+        maxDownloads: Number(maxDownloads) || 0,
         visitor,
         signal: controller.signal,
         onProgress: (loaded) => {

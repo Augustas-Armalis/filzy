@@ -32,22 +32,6 @@ const CARD_SHELL = "glass-surface w-[280px] max-w-full shrink-0 overflow-hidden 
 const CARD_INNER = "flex flex-col gap-[8px] p-[8px]";
 const CTA = "flex h-[38px] items-center justify-center rounded-[11px] bg-text font-casser text-[16px] font-normal text-white cursor-pointer transition-all duration-150 hover:bg-text-hover";
 
-// Smoothly animate a card's height as its contents expand / collapse.
-function useAutoHeight() {
-  const ref = useRef(null);
-  const [height, setHeight] = useState();
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => setHeight(el.offsetHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, height];
-}
-
 // Blur-fade-up for content that expands into view (QR, file settings).
 const reveal = {
   initial: { opacity: 0, y: 6, filter: "blur(6px)" },
@@ -264,7 +248,7 @@ function FileModule({ items, onRemove, onAddMore, isDragging, overdrive, onToggl
 
 // Left card: the live server + copy link / QR / share.
 function ServerCard({ shareUrl }) {
-  const [innerRef, height] = useAutoHeight();
+  const innerRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
 
@@ -291,7 +275,7 @@ function ServerCard({ shareUrl }) {
   };
 
   return (
-    <motion.div animate={{ height: height ?? "auto" }} transition={{ duration: 0.3, ease: "easeOut" }} className={CARD_SHELL}>
+    <motion.div layout="size" transition={{ layout: { duration: 0.3, ease: "easeOut" } }} className={CARD_SHELL}>
       <div ref={innerRef} className={CARD_INNER}>
         <StatusBox Icon={Radio} iconClass="text-green-500 animate-pulse [animation-duration:2.4s]" title="Your server is live!" subtitle="It's available as long as you run it here" />
 
@@ -329,7 +313,7 @@ function ServerCard({ shareUrl }) {
 
 // Right card: live stats + connected users (or empty) + stop + (toggled) file settings.
 function StreamCard({ users, speed, items, onStop, onKick, onOverdrive, onAddMore, onRemove, isDragging }) {
-  const [innerRef, height] = useAutoHeight();
+  const innerRef = useRef(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [overdrive, setOverdrive] = useState(false);
   const hasUsers = users.length > 0;
@@ -343,7 +327,7 @@ function StreamCard({ users, speed, items, onStop, onKick, onOverdrive, onAddMor
   };
 
   return (
-    <motion.div animate={{ height: height ?? "auto" }} transition={{ duration: 0.3, ease: "easeOut" }} className={CARD_SHELL}>
+    <motion.div layout="size" transition={{ layout: { duration: 0.3, ease: "easeOut" } }} className={CARD_SHELL}>
       <div ref={innerRef} className={CARD_INNER}>
         <div className="flex gap-[4px]">
           <StatPill Icon={Signal} green={overdrive}>{formatBytes(speed || 0)}/s</StatPill>
