@@ -1069,6 +1069,7 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
 }
 
 @media (max-width: 720px) {
+  .movie-edge-blur { height: 88px; }
   .movie-header { top: 0; padding: 0; }
   .movie-header__glass { grid-template-columns: minmax(112px, 1fr) auto 38px; width: calc(100% - 24px); min-height: 60px; border-radius: 0; }
   .movie-header__glass--player { grid-template-columns: minmax(0, 1fr) 38px; }
@@ -1111,7 +1112,7 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
   .movie-search-result > .movie-image { width: 46px; height: 63px; }
   .movie-search-result__skeleton-art { width: 46px; height: 63px; }
   .movie-search-result h3 { font-size: 17px; }
-  .movie-player-main { padding: 76px 8px 70px; }
+  .movie-player-main { padding: max(96px, calc(env(safe-area-inset-top) + 82px)) 8px 70px; }
   .movie-player-titlebar { grid-template-columns: 40px minmax(0, 1fr) auto; margin: 12px 4px 16px; }
   .movie-player-titlebar__meta { display: flex; padding: 0; }
   .movie-player-titlebar__meta > span:not(.movie-player-rating) { display: none; }
