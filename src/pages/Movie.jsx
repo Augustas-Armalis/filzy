@@ -11,8 +11,10 @@ import {
   ChevronRight,
   Film,
   LoaderCircle,
+  Maximize2,
   Play,
   Search,
+  Star,
   Tv2,
   X,
 } from "lucide-react";
@@ -65,6 +67,35 @@ function TypeMark({ type, compact = false }) {
   );
 }
 
+function ratingVerdict(value) {
+  const rating = Number(value);
+  if (!rating) return "Rating pending";
+  if (rating >= 8.5) return "Exceptional audience score";
+  if (rating >= 7.5) return "Highly rated";
+  if (rating >= 6.5) return "Positive audience score";
+  return "Mixed audience score";
+}
+
+function RatingMark({ rating, compact = false, detailed = false }) {
+  const score = Number(rating);
+  const available = Number.isFinite(score) && score > 0;
+  return (
+    <span
+      className={cn(
+        "movie-rating-mark",
+        compact && "movie-rating-mark--compact",
+        detailed && "movie-rating-mark--detailed",
+        !available && "is-unrated",
+      )}
+      aria-label={available ? `IMDb rating ${score} out of 10` : "IMDb rating unavailable"}
+    >
+      <Star size={compact ? 9 : 13} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+      <span className="movie-rating-mark__score">{available ? score.toFixed(1) : "N/R"}</span>
+      <span className="movie-rating-mark__source"><b>IMDb</b>{detailed && <small>{available ? "out of 10" : "not rated"}</small>}</span>
+    </span>
+  );
+}
+
 function MediaImage({ media, className, priority = false, backdrop = false }) {
   const [failed, setFailed] = useState(false);
   const source = backdrop ? media.background || media.image : media.image;
@@ -76,6 +107,9 @@ function MediaImage({ media, className, priority = false, backdrop = false }) {
           src={source}
           alt=""
           aria-hidden="true"
+          width={backdrop ? 1920 : 720}
+          height={backdrop ? 1080 : 1080}
+          sizes={backdrop ? "100vw" : "(max-width: 720px) 50vw, 17vw"}
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : "auto"}
           decoding="async"
@@ -129,7 +163,8 @@ function SecretHeader({ view, onView, onSearch, onHome, player = false }) {
     <header className="movie-header">
       <LiquidSurface className={cn("movie-header__glass", player && "movie-header__glass--player")}>
         <button type="button" onClick={onHome} className="movie-wordmark" aria-label={player ? "Return to catalog" : "Scroll to top"}>
-          <span className="movie-wordmark__text">Augustas Films</span>
+          <span className="movie-wordmark__text movie-wordmark__text--desktop" aria-hidden="true">Augustas Films</span>
+          <span className="movie-wordmark__text movie-wordmark__text--mobile" aria-hidden="true">Films</span>
         </button>
         {!player && (
           <nav aria-label="Browse" className="movie-header__nav">
@@ -237,6 +272,7 @@ function PosterCard({ media, index, progress, onSelect }) {
   const watched = progressRatio(progress);
 
   const move = (event) => {
+    if (event.pointerType === "touch") return;
     const rect = event.currentTarget.getBoundingClientRect();
     x.set((event.clientX - rect.left) / rect.width - 0.5);
     y.set((event.clientY - rect.top) / rect.height - 0.5);
@@ -252,24 +288,31 @@ function PosterCard({ media, index, progress, onSelect }) {
       viewport={{ once: true, margin: "0px 0px -8% 0px" }}
       transition={{ delay: Math.min((index % 6) * 0.045, 0.22), duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
       onPointerMove={move}
-      onPointerLeave={() => { x.set(0); y.set(0); }}
+      onPointerLeave={(event) => {
+        x.set(0);
+        y.set(0);
+        event.currentTarget.style.removeProperty("--card-x");
+        event.currentTarget.style.removeProperty("--card-y");
+      }}
+      onPointerCancel={() => { x.set(0); y.set(0); }}
       onClick={() => onSelect(media)}
       className="movie-poster-card"
+      style={{ rotateX, rotateY, transformPerspective: 900 }}
     >
-      <motion.div className="movie-poster-card__clip" style={{ rotateX, rotateY, transformPerspective: 720 }}>
+      <div className="movie-poster-card__clip">
         <div className="movie-poster-card__art">
           <MediaImage media={media} />
           <div className="movie-poster-card__shade" />
           <div className="movie-poster-card__specular" />
           <div className="movie-poster-card__top"><TypeMark type={media.mediaType} compact /></div>
-          <div className={cn("movie-poster-card__rating", !media.rating && "is-unrated")}>{media.rating ? `IMDb ${media.rating}` : "Not rated"}</div>
+          <div className="movie-poster-card__rating"><RatingMark rating={media.rating} compact /></div>
           <div className="movie-poster-card__hover">
             <span className="movie-poster-card__play"><Play size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" /></span>
             <span>Open {media.mediaType === "tv" ? "series" : "film"}</span>
           </div>
           {watched > 0 && <div className="movie-poster-card__progress"><i style={{ width: `${watched * 100}%` }} /></div>}
         </div>
-      </motion.div>
+      </div>
       <div className="movie-poster-card__copy">
         <h3>{media.title}</h3>
         <p>{[media.year, media.mediaType === "tv" ? "Series" : media.runtime, media.rating ? `IMDb ${media.rating}` : "Not rated"].filter(Boolean).join(" · ")}</p>
@@ -342,7 +385,7 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
       {open && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="movie-search-overlay" data-lenis-prevent>
           <button type="button" aria-label="Close search" onClick={onClose} className="movie-search-overlay__backdrop" />
-          <motion.div initial={{ opacity: 0, y: -22, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -14, scale: 0.99 }} transition={{ duration: 0.38, ease: [0.2, 0.8, 0.2, 1] }} className="movie-search-overlay__panel movie-glass">
+          <motion.div role="dialog" aria-modal="true" aria-label="Search the catalog" initial={{ opacity: 0, y: -22, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -14, scale: 0.99 }} transition={{ duration: 0.38, ease: [0.2, 0.8, 0.2, 1] }} className="movie-search-overlay__panel movie-glass">
             <div className="movie-search-overlay__head"><p><span>Augustas Films</span> Find a title</p><button type="button" onClick={onClose} aria-label="Close search"><X {...iconProps} /></button></div>
             <form
               onSubmit={(event) => { event.preventDefault(); if (shown[highlightedIndex]) choose(shown[highlightedIndex]); }}
@@ -354,7 +397,16 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
               className="movie-search-field"
             >
               {status === "loading" ? <LoaderCircle {...iconProps} className="animate-spin" /> : <Search {...iconProps} />}
-              <input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Shows, movies, and more" aria-label="Search shows, movies, and more" autoComplete="off" spellCheck="false" />
+              <input
+                ref={inputRef}
+                name="movie-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search titles or paste an ID…"
+                aria-label="Search movies, series, IMDb or TMDB"
+                autoComplete="off"
+                spellCheck="false"
+              />
               {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} strokeWidth={1.4} absoluteStrokeWidth /></button>}
               <button type="submit" disabled={!shown.length} aria-label="Open first result"><ArrowRight {...iconProps} /></button>
             </form>
@@ -402,7 +454,7 @@ function EpisodeShelf({ media, details, onEpisode }) {
         <div><p>Episode guide</p><h2>Season {String(season).padStart(2, "0")}</h2></div>
         <div className="movie-season-nav">
           {allSeasons.length ? allSeasons.map((number) => <button key={number} type="button" onClick={() => setSeason(number)} className={cn(number === season && "is-active")}>{String(number).padStart(2, "0")}</button>) : (
-            <><button type="button" onClick={() => setSeason(Math.max(1, season - 1))}><ChevronLeft {...iconProps} /></button><span>Season {season}</span><button type="button" onClick={() => setSeason(season + 1)}><ChevronRight {...iconProps} /></button></>
+            <><button type="button" aria-label="Previous season" onClick={() => setSeason(Math.max(1, season - 1))}><ChevronLeft {...iconProps} /></button><span>Season {season}</span><button type="button" aria-label="Next season" onClick={() => setSeason(season + 1)}><ChevronRight {...iconProps} /></button></>
           )}
         </div>
       </div>
@@ -412,7 +464,7 @@ function EpisodeShelf({ media, details, onEpisode }) {
             const selected = episode.episode === (media.episode || 1) && episode.season === (media.season || 1);
             return (
               <button key={episode.id} type="button" onClick={() => onEpisode(episode)} className={cn("movie-episode", selected && "is-active")}>
-                <div className="movie-episode__art">{episode.image ? <img src={episode.image} alt="" loading="lazy" /> : <span>E{String(episode.episode).padStart(2, "0")}</span>}<i><Play size={12} fill="currentColor" strokeWidth={0} /></i></div>
+                <div className="movie-episode__art">{episode.image ? <img src={episode.image} alt="" width="640" height="348" loading="lazy" /> : <span>E{String(episode.episode).padStart(2, "0")}</span>}<i><Play size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" /></i></div>
                 <div className="movie-episode__copy"><span>Episode {String(episode.episode).padStart(2, "0")}</span><h3>{episode.title}</h3><p>{episode.description}</p></div>
               </button>
             );
@@ -433,6 +485,7 @@ function EpisodeShelf({ media, details, onEpisode }) {
 function PlayerPage({ media, catalog, history, onSelect, onClose, onSearch, onHistory }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
   const lastWrite = useRef(0);
+  const playerShellRef = useRef(null);
   const saved = savedItemFor(history, media);
   const sameEpisode = media.mediaType !== "tv" || (saved?.season === media.season && saved?.episode === media.episode);
   const initialStartAt = sameEpisode && Number(saved?.progress?.watched) > 15 ? saved.progress.watched : 0;
@@ -465,6 +518,27 @@ function PlayerPage({ media, catalog, history, onSelect, onClose, onSearch, onHi
     };
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
   }, [details, media, onHistory]);
+  const toggleFullscreen = useCallback(async () => {
+    const shell = playerShellRef.current;
+    if (!shell) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await shell.requestFullscreen();
+    } catch {
+      // The native player fullscreen control remains available when the host request is denied.
+    }
+  }, []);
+  useEffect(() => {
+    const shortcut = (event) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "f") return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button")) return;
+      event.preventDefault();
+      toggleFullscreen();
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, [toggleFullscreen]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -475,15 +549,15 @@ function PlayerPage({ media, catalog, history, onSelect, onClose, onSearch, onHi
         <div className="movie-player-titlebar">
           <button type="button" onClick={onClose} className="movie-round-button" aria-label="Back to catalog"><ArrowLeft {...iconProps} /></button>
           <div><TypeMark type={media.mediaType} /><h1>{details.title || media.title}</h1></div>
-          <div className="movie-player-titlebar__meta">
+          <div className="movie-player-titlebar__actions">
             {[details.year, details.runtime].filter(Boolean).map((item) => <span key={item}>{item}</span>)}
-            <span className={cn("movie-player-rating", !details.rating && "is-unrated")}><strong>{details.rating || "N/R"}</strong><span><small>IMDb</small><em>{details.rating ? "out of 10" : "not rated"}</em></span></span>
+            <button type="button" onClick={toggleFullscreen} className="movie-player-fullscreen" aria-label="Open player fullscreen" aria-keyshortcuts="f" title="Fullscreen (F)"><Maximize2 {...iconProps} /></button>
+            <RatingMark rating={details.rating} detailed />
           </div>
         </div>
-        <div className="movie-player-shell">
+        <div ref={playerShellRef} className="movie-player-shell">
           <div className="movie-player-shell__screen">
             <iframe
-              key={playerUrl}
               src={playerUrl}
               title={`${details.title || media.title} player`}
               width="100%"
@@ -498,7 +572,18 @@ function PlayerPage({ media, catalog, history, onSelect, onClose, onSearch, onHi
             <div className="movie-player-shell__native-chrome" aria-hidden="true" />
           </div>
         </div>
-        <section className="movie-player-about"><div><p>{details.detail || "Selected from the private catalog."}</p></div><dl><div><dt>IMDb rating</dt><dd>{details.rating ? `${details.rating} / 10` : "Not yet rated"}</dd></div>{details.director && <div><dt>Director</dt><dd>{details.director}</dd></div>}{details.cast?.length > 0 && <div><dt>Cast</dt><dd>{details.cast.slice(0, 4).join(", ")}</dd></div>}{details.genres?.length > 0 && <div><dt>Genres</dt><dd>{details.genres.slice(0, 4).join(", ")}</dd></div>}</dl></section>
+        <section className="movie-player-about">
+          <div className="movie-player-about__overview"><p>{details.detail || "Selected from the private catalog."}</p></div>
+          <div className="movie-player-about__facts">
+            <article className={cn("movie-rating-detail", !details.rating && "is-unrated")}>
+              <div className="movie-rating-detail__heading"><span>IMDb audience rating</span><small>{ratingVerdict(details.rating)}</small></div>
+              <div className="movie-rating-detail__score"><strong>{details.rating ? Number(details.rating).toFixed(1) : "N/R"}</strong>{details.rating && <span>/ 10</span>}</div>
+              <div className="movie-rating-detail__track" aria-hidden="true"><i style={{ width: `${Math.min(100, Math.max(0, Number(details.rating) * 10 || 0))}%` }} /></div>
+              <p>{details.rating ? `Catalog metadata reports an IMDb score of ${Number(details.rating).toFixed(1)}.` : "No IMDb score is available for this title yet."}</p>
+            </article>
+            <dl>{details.director && <div><dt>Director</dt><dd>{details.director}</dd></div>}{details.cast?.length > 0 && <div><dt>Cast</dt><dd>{details.cast.slice(0, 4).join(", ")}</dd></div>}{details.genres?.length > 0 && <div><dt>Genres</dt><dd>{details.genres.slice(0, 4).join(", ")}</dd></div>}{details.year && <div><dt>Released</dt><dd>{details.year}</dd></div>}</dl>
+          </div>
+        </section>
         {media.mediaType === "tv" && <EpisodeShelf media={media} details={details} onEpisode={selectedEpisode} />}
         <section className="movie-more"><div className="movie-section-heading"><div><p>Keep watching</p><h2>{media.mediaType === "tv" ? "More series" : "More films"}</h2></div></div><div className="movie-catalog-grid movie-catalog-grid--compact">{catalog.filter((item) => item.mediaType === media.mediaType && !sameMedia(item, media)).slice(0, 6).map((item, index) => <PosterCard key={item.id} media={item} index={index} progress={savedItemFor(history, item)?.progress} onSelect={onSelect} />)}</div></section>
       </main>
