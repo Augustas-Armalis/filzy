@@ -285,12 +285,13 @@ function prerenderedContent(page) {
     </div>`;
 }
 
-function renderRouteHtml(template, page, { noindex = false } = {}) {
+function renderRouteHtml(template, page, { noindex = false, nofollow = false } = {}) {
   const url = absoluteUrl(page.path);
   let html = template.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(fullTitle(page))}</title>`);
   html = replaceMeta(html, "name", "description", page.description);
-  html = replaceMeta(html, "name", "robots", noindex ? "noindex, follow" : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1");
-  html = replaceMeta(html, "name", "googlebot", noindex ? "noindex, follow" : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1");
+  const hiddenRobots = `noindex, ${nofollow ? "nofollow" : "follow"}, noarchive, nosnippet, noimageindex`;
+  html = replaceMeta(html, "name", "robots", noindex ? hiddenRobots : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1");
+  html = replaceMeta(html, "name", "googlebot", noindex ? hiddenRobots : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1");
   html = replaceMeta(html, "property", "og:type", page.type === "article" ? "article" : "website");
   html = replaceMeta(html, "property", "og:title", fullTitle(page));
   html = replaceMeta(html, "property", "og:description", page.description);
@@ -335,6 +336,23 @@ function seoStaticPages() {
         const destination = page.path === "/" ? join(outDir, "index.html") : join(outDir, page.path.slice(1), "index.html");
         await mkdir(join(destination, ".."), { recursive: true });
         await writeFile(destination, renderRouteHtml(template, page), "utf8");
+      }
+
+      // App-only routes still need a physical HTML entry point on GitHub Pages,
+      // but stay out of the SEO catalog and sitemap.
+      const appOnlyPages = [{
+        path: "/movie",
+        type: "website",
+        title: "Augustas Films",
+        heading: "Augustas Films",
+        description: "Search movies and TV series by title, IMDb ID, or TMDB ID and open them in a focused embedded player.",
+        intro: "A focused movie and TV search with direct player access and progress stored on this device.",
+        relatedPaths: [],
+      }];
+      for (const page of appOnlyPages) {
+        const destination = join(outDir, page.path.slice(1), "index.html");
+        await mkdir(join(destination, ".."), { recursive: true });
+        await writeFile(destination, renderRouteHtml(template, page, { noindex: true, nofollow: true }), "utf8");
       }
 
       const notFound = {

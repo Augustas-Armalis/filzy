@@ -19,6 +19,7 @@ export function Shell({ children }) {
   const [photo, setPhoto] = useState(null);
   const location = useLocation();
   const [backgroundKey, setBackgroundKey] = useState(location.pathname);
+  const movieMode = location.pathname === "/movie";
 
   useEffect(() => {
     if (backgroundKey === location.pathname) return undefined;
@@ -28,10 +29,10 @@ export function Shell({ children }) {
 
   return (
     <div className="relative flex min-h-[100svh] w-full flex-col bg-[#050505]">
-      <UnsplashBackground onPhoto={setPhoto} sceneKey={backgroundKey} />
-      <Navbar />
-      <PoweredBy />
-      <Attribution photo={photo} />
+      {!movieMode && <UnsplashBackground onPhoto={setPhoto} sceneKey={backgroundKey} />}
+      {!movieMode && <Navbar />}
+      {!movieMode && <PoweredBy />}
+      {!movieMode && <Attribution photo={photo} />}
       {/*
         pointer-events-none lets clicks in the empty areas of <main> fall through
         to the credits behind it (z-0); each page re-enables its actual cards with
