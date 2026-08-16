@@ -486,7 +486,7 @@ function EpisodeShelf({ media, details, onEpisode }) {
 
 function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
-  const [transport, setTransport] = useState({ autoPlay: true, sequence: 0, startAt: 0 });
+  const [transport, setTransport] = useState({ autoPlay: true, captions: false, sequence: 0, startAt: 0 });
   const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const lastWrite = useRef(0);
@@ -499,8 +499,9 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     hideServer: false,
     poster: false,
     startAt: transport.startAt,
+    sub: transport.captions ? "en" : "off",
     theme: "FFFFFF",
-  }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.startAt]);
+  }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.startAt]);
 
   const updatePlayerStatus = useCallback((patch) => {
     playerStatusRef.current = { ...playerStatusRef.current, ...patch };
@@ -509,19 +510,32 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const sendPlayerCommand = useCallback((command, payload = {}) => {
     playerFrameRef.current?.contentWindow?.postMessage({ command, ...payload }, VIDUP_ORIGIN);
   }, []);
-  const remountPlayer = useCallback((autoPlay) => {
+  const remountPlayer = useCallback((overrides = {}) => {
     const startAt = Math.max(0, Math.min(
       playerStatusRef.current.duration || Number.POSITIVE_INFINITY,
-      playerStatusRef.current.currentTime || 0,
+      Number(overrides.startAt ?? playerStatusRef.current.currentTime) || 0,
     ));
-    setTransport((current) => ({ autoPlay, sequence: current.sequence + 1, startAt }));
-    updatePlayerStatus({ currentTime: startAt, playing: autoPlay });
+    setTransport((current) => ({ ...current, ...overrides, sequence: current.sequence + 1, startAt }));
+    updatePlayerStatus({
+      currentTime: startAt,
+      ...(typeof overrides.autoPlay === "boolean" ? { playing: overrides.autoPlay } : {}),
+    });
   }, [updatePlayerStatus]);
   const togglePlayback = useCallback(() => {
     const shouldPlay = !playerStatusRef.current.playing;
     sendPlayerCommand(shouldPlay ? "play" : "pause");
-    remountPlayer(shouldPlay);
+    remountPlayer({ autoPlay: shouldPlay });
   }, [remountPlayer, sendPlayerCommand]);
+  const toggleCaptions = useCallback(() => {
+    const captions = !transport.captions;
+    remountPlayer({ autoPlay: playerStatusRef.current.playing, captions });
+  }, [remountPlayer, transport.captions]);
+  const toggleMuted = useCallback(() => {
+    const muted = !playerStatusRef.current.muted;
+    sendPlayerCommand("mute", { muted, value: muted });
+    updatePlayerStatus({ muted });
+    window.setTimeout(() => sendPlayerCommand("getStatus"), 140);
+  }, [sendPlayerCommand, updatePlayerStatus]);
   const toggleFullscreen = useCallback(async () => {
     const frame = playerFrameRef.current;
     if (!frame) return;
@@ -580,11 +594,11 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   useEffect(() => {
     playerStatusRef.current = { currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 };
     setPlayerStatus(playerStatusRef.current);
-    setTransport({ autoPlay: true, sequence: 0, startAt: 0 });
+    setTransport({ autoPlay: true, captions: false, sequence: 0, startAt: 0 });
     setIsFullscreen(false);
   }, [media.episode, media.id, media.mediaType, media.season]);
   const forcePlayerFocus = useCallback(() => {
-    window.requestAnimationFrame(() => playerFrameRef.current?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => playerShellRef.current?.focus({ preventScroll: true }));
   }, []);
   const focusPlayer = useCallback(() => {
     if (searchOpen || document.querySelector(".movie-search-overlay")) return;
@@ -595,6 +609,26 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     const timer = window.setTimeout(focusPlayer, 360);
     return () => window.clearTimeout(timer);
   }, [focusPlayer, searchOpen]);
+  useEffect(() => {
+    if (searchOpen) return undefined;
+    const shortcut = (event) => {
+      if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (document.querySelector(".movie-search-overlay")) return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+      const actions = {
+        Space: togglePlayback,
+        KeyF: toggleFullscreen,
+        KeyC: toggleCaptions,
+        KeyM: toggleMuted,
+      };
+      const action = actions[event.code];
+      if (!action) return;
+      event.preventDefault();
+      action();
+    };
+    window.addEventListener("keydown", shortcut, true);
+    return () => window.removeEventListener("keydown", shortcut, true);
+  }, [searchOpen, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -623,6 +657,8 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             ref={playerShellRef}
             className="movie-player-shell"
             onPointerEnter={focusPlayer}
+            tabIndex={-1}
+            aria-keyshortcuts="Space F C M"
           >
             <div className="movie-player-shell__screen">
               <iframe

@@ -1056,6 +1056,7 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
 .movie-player-stage { position: relative; isolation: isolate; }
 .movie-player-stage::before { position: absolute; z-index: -1; inset: 3% 7% -8%; border-radius: 40%; pointer-events: none; content: ""; background: rgba(255, 255, 255, 0.1); filter: blur(70px); opacity: 0.5; }
 .movie-player-shell { position: relative; overflow: clip; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 22px; background: #000; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 32px 110px rgba(0, 0, 0, 0.72); transform: translateZ(0); }
+.movie-player-shell:focus { outline: none; }
 .movie-player-shell__screen { position: relative; aspect-ratio: 16 / 9; }
 .movie-player-shell iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; pointer-events: auto; }
 .movie-player-shell__reflection { position: absolute; z-index: 2; top: 0; right: 0; left: 0; height: 18%; pointer-events: none; background: linear-gradient(to bottom, rgba(255, 255, 255, 0.035), transparent); }
