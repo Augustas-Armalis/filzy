@@ -343,8 +343,8 @@ function seoStaticPages() {
       const appOnlyPages = [{
         path: "/movie",
         type: "website",
-        title: "Augustas Films",
-        heading: "Augustas Films",
+        title: "AFilm",
+        heading: "AFilm",
         description: "Search movies and TV series by title, IMDb ID, or TMDB ID and open them in a focused embedded player.",
         intro: "A focused movie and TV search with direct player access and progress stored on this device.",
         relatedPaths: [],

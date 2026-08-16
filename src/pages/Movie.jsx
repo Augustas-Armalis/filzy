@@ -165,8 +165,8 @@ function SecretHeader({ view, onView, onSearch, onHome, player = false }) {
     <header className="movie-header">
       <LiquidSurface className={cn("movie-header__glass", player && "movie-header__glass--player")}>
         <button type="button" onClick={onHome} className="movie-wordmark" aria-label={player ? "Return to catalog" : "Scroll to top"}>
-          <span className="movie-wordmark__text movie-wordmark__text--desktop" aria-hidden="true">Augustas Films</span>
-          <span className="movie-wordmark__text movie-wordmark__text--mobile" aria-hidden="true">Films</span>
+          <span className="movie-wordmark__text movie-wordmark__text--desktop" aria-hidden="true">AFilm</span>
+          <span className="movie-wordmark__text movie-wordmark__text--mobile" aria-hidden="true">AFilm</span>
         </button>
         {!player && (
           <nav aria-label="Browse" className="movie-header__nav">
@@ -826,7 +826,7 @@ function MovieExperience() {
               <div className="movie-catalog-grid">{catalogStatus === "loading" ? <CatalogSkeleton /> : visibleCatalog.map((media, index) => <PosterCard key={`${media.mediaType}-${media.id}`} media={media} index={index} progress={savedItemFor(history, media)?.progress} onSelect={select} />)}</div>
               <div ref={sentinelRef} className="movie-catalog-sentinel">{hasMore ? <button type="button" onClick={loadMore} disabled={catalogStatus === "more"}>{catalogStatus === "more" ? <LoaderCircle {...iconProps} className="animate-spin" /> : <ArrowDown {...iconProps} />}{catalogStatus === "more" ? "Loading titles" : "Load more"}</button> : <span>You reached the end of the room.</span>}</div>
             </main>
-            <footer ref={footerRef} className="movie-footer"><span>Augustas Films</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p><span>Local progress · No account</span></footer>
+            <footer ref={footerRef} className="movie-footer"><span>AFilm</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p><span>Local progress · No account</span></footer>
           </motion.div>
         )}
       </AnimatePresence>
@@ -836,6 +836,6 @@ function MovieExperience() {
 }
 
 export default function Movie() {
-  useSeo({ title: "Augustas Films", description: "A private movie and series search with direct player access and progress stored on this device.", path: "/movie", robots: "noindex, nofollow, noarchive, nosnippet, noimageindex" });
+  useSeo({ title: "AFilm", description: "A private movie and series search with direct player access and progress stored on this device.", path: "/movie", robots: "noindex, nofollow, noarchive, nosnippet, noimageindex" });
   return <ReactLenis root options={{ autoRaf: true, duration: 1.08, smoothWheel: true, wheelMultiplier: 0.86, touchMultiplier: 1.2 }}><MovieExperience /></ReactLenis>;
 }
