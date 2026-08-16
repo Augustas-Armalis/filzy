@@ -1221,15 +1221,17 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
   .movie-search-result__skeleton-art { width: 52px; height: 72px; border-radius: 9px; }
   .movie-search-result h3 { font-size: 19px; }
   .movie-player-main { padding: max(104px, calc(env(safe-area-inset-top) + 90px)) var(--movie-gutter) 70px; }
-  .movie-player-titlebar { grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px 12px; margin: 12px 4px 16px; }
-  .movie-player-titlebar__actions { display: flex; width: 100%; grid-column: 1 / -1; justify-content: flex-end; gap: 6px; padding: 0; }
+  .movie-player-titlebar { grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 6px; margin: 12px 0 16px; }
+  .movie-player-titlebar > .movie-round-button { width: 40px; height: 40px; }
+  .movie-player-titlebar__actions { display: flex; width: auto; grid-column: auto; justify-content: flex-end; gap: 4px; padding: 0; }
   .movie-player-titlebar__actions > span:not(.movie-rating-mark) { display: none; }
   .movie-player-titlebar__controls { gap: 3px; }
-  .movie-player-titlebar__controls button { width: 44px; height: 44px; border-radius: 12px; touch-action: manipulation; }
-  .movie-rating-mark--detailed { min-width: 62px; height: 36px; grid-template-columns: auto auto; gap: 5px; padding: 0 8px; border-radius: 10px; }
-  .movie-rating-mark--detailed .movie-rating-mark__score { font-size: 20px; }
+  .movie-player-titlebar__controls button { width: 40px; height: 40px; border-radius: 11px; touch-action: manipulation; }
+  .movie-rating-mark--detailed { min-width: 52px; height: 40px; grid-template-columns: auto auto; gap: 3px; padding: 0 6px; border-radius: 11px; }
+  .movie-rating-mark--detailed > svg { width: 10px; height: 10px; }
+  .movie-rating-mark--detailed .movie-rating-mark__score { font-size: 18px; }
   .movie-rating-mark--detailed .movie-rating-mark__source { display: none; }
-  .movie-player-titlebar h1 { overflow: hidden; font-size: 32px; text-overflow: ellipsis; white-space: nowrap; }
+  .movie-player-titlebar h1 { overflow: hidden; font-size: clamp(24px, 7.5vw, 32px); text-overflow: ellipsis; white-space: nowrap; }
   .movie-player-shell { border-radius: 18px; }
   .movie-player-shell__screen { min-height: 0; }
   .movie-player-about { gap: 26px; padding: 38px 8px 50px; }
