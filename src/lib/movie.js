@@ -244,6 +244,36 @@ export function parseMediaInput(value, preferredType = "movie") {
   };
 }
 
+export function parseMovieShareSearch(search = "") {
+  const params = search instanceof URLSearchParams
+    ? search
+    : new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  const mediaType = params.get("type") === "tv" ? "tv" : "movie";
+  const media = parseMediaInput(params.get("id"), mediaType);
+  if (!media) return null;
+  if (mediaType !== "tv") return media;
+  return {
+    ...media,
+    season: Math.max(1, Number(params.get("season")) || 1),
+    episode: Math.max(1, Number(params.get("episode")) || 1),
+  };
+}
+
+export function buildMovieShareUrl(media, baseUrl) {
+  const url = new URL(baseUrl);
+  url.search = "";
+  url.hash = "";
+  if (!media?.id) return url.toString();
+  const mediaType = media.mediaType === "tv" ? "tv" : "movie";
+  url.searchParams.set("id", String(media.id));
+  url.searchParams.set("type", mediaType);
+  if (mediaType === "tv") {
+    url.searchParams.set("season", String(Math.max(1, Number(media.season) || 1)));
+    url.searchParams.set("episode", String(Math.max(1, Number(media.episode) || 1)));
+  }
+  return url.toString();
+}
+
 export function buildPlayerUrl(media, options = {}) {
   if (!media?.id) return "";
   const mediaType = media.mediaType === "tv" ? "tv" : "movie";

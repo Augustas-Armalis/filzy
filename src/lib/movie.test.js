@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildPlayerUrl, fetchMediaDetails, formatRuntime, parseMediaInput, searchMedia } from "@/lib/movie";
+import {
+  buildMovieShareUrl,
+  buildPlayerUrl,
+  fetchMediaDetails,
+  formatRuntime,
+  parseMediaInput,
+  parseMovieShareSearch,
+  searchMedia,
+} from "@/lib/movie";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,6 +53,27 @@ describe("movie player helpers", () => {
     expect(parseMediaInput("https://vidup.to/tv/tt4052886/3/7?autoPlay=true"))
       .toMatchObject({ id: "tt4052886", mediaType: "tv", season: 3, episode: 7 });
     expect(parseMediaInput("The Dark Knight")).toBeNull();
+  });
+
+  it("parses shareable movie and episode URLs", () => {
+    expect(parseMovieShareSearch("?id=tt1375666&type=movie"))
+      .toMatchObject({ id: "tt1375666", mediaType: "movie" });
+    expect(parseMovieShareSearch("?id=tt4052886&type=tv&season=3&episode=7"))
+      .toMatchObject({ id: "tt4052886", mediaType: "tv", season: 3, episode: 7 });
+    expect(parseMovieShareSearch("?id=not-a-title&type=movie")).toBeNull();
+  });
+
+  it("builds clean share URLs and removes stale query values", () => {
+    expect(buildMovieShareUrl(
+      { id: "tt1375666", mediaType: "movie" },
+      "https://filzy.site/movie/?v=stale#player",
+    )).toBe("https://filzy.site/movie/?id=tt1375666&type=movie");
+    expect(buildMovieShareUrl(
+      { id: "tt4052886", mediaType: "tv", season: 3, episode: 7 },
+      "https://filzy.site/movie/",
+    )).toBe("https://filzy.site/movie/?id=tt4052886&type=tv&season=3&episode=7");
+    expect(buildMovieShareUrl(null, "https://filzy.site/movie/?id=tt1375666&type=movie"))
+      .toBe("https://filzy.site/movie/");
   });
 
   it("formats player durations", () => {

@@ -21,12 +21,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  buildMovieShareUrl,
   buildPlayerUrl,
   FEATURED_MEDIA,
   fetchCatalogPage,
   fetchMediaDetails,
   loadMovieHistory,
   parseMediaInput,
+  parseMovieShareSearch,
   saveMovieHistory,
   searchMedia,
   VIDUP_ORIGIN,
@@ -769,7 +771,7 @@ function MovieExperience() {
   const [catalog, setCatalog] = useState(FEATURED_MEDIA);
   const [catalogStatus, setCatalogStatus] = useState("loading");
   const [view, setView] = useState("all");
-  const [active, setActive] = useState(null);
+  const [active, setActive] = useState(() => parseMovieShareSearch(window.location.search));
   const [history, setHistory] = useState(loadMovieHistory);
   const [heroIndex, setHeroIndex] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -782,6 +784,15 @@ function MovieExperience() {
   const openSearch = useCallback(() => {
     setSearchOpen(true);
     window.requestAnimationFrame(() => document.querySelector("input[name='movie-search']")?.focus({ preventScroll: true }));
+  }, []);
+  const updateShareUrl = useCallback((media) => {
+    const nextUrl = buildMovieShareUrl(media, window.location.href);
+    if (nextUrl === window.location.href) return;
+    window.history.pushState({ ...window.history.state, afilmMedia: media ? {
+      id: media.id,
+      mediaType: media.mediaType,
+      ...(media.mediaType === "tv" ? { season: media.season || 1, episode: media.episode || 1 } : {}),
+    } : null }, "", nextUrl);
   }, []);
 
   useEffect(() => {
@@ -812,6 +823,14 @@ function MovieExperience() {
     return () => document.removeEventListener("keydown", shortcut, true);
   }, [openSearch]);
   useEffect(() => {
+    const syncFromUrl = () => {
+      setSearchOpen(false);
+      setActive(parseMovieShareSearch(window.location.search));
+    };
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
+  useEffect(() => {
     lenis?.scrollTo(0, { immediate: true, force: true });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     const settle = window.setTimeout(() => {
@@ -826,10 +845,11 @@ function MovieExperience() {
   const select = (media) => {
     const saved = savedItemFor(history, media); const sameEpisode = media.mediaType !== "tv" || (saved?.season === (media.season || 1) && saved?.episode === (media.episode || 1));
     const next = { ...saved, ...media, season: media.mediaType === "tv" ? media.season || saved?.season || 1 : undefined, episode: media.mediaType === "tv" ? media.episode || saved?.episode || 1 : undefined, progress: sameEpisode ? media.progress || saved?.progress : media.progress };
-    setActive(next); setHistory(saveMovieHistory(next));
+    setActive(next); setHistory(saveMovieHistory(next)); updateShareUrl(next);
   };
   const changeView = (nextView) => { setView(nextView); setHeroIndex(0); lenis?.scrollTo("#catalog", { offset: -110, duration: 1.1 }); };
-  const goHome = () => { if (active) setActive(null); else lenis?.scrollTo(0, { duration: 1.1 }); };
+  const closePlayer = () => { setActive(null); updateShareUrl(null); };
+  const goHome = () => { if (active) closePlayer(); else lenis?.scrollTo(0, { duration: 1.1 }); };
 
   return (
     <section className="movie-page">
@@ -837,7 +857,7 @@ function MovieExperience() {
       <ProgressiveEdgeBlur edge="bottom" hidden={!active && footerInView} />
       <AnimatePresence mode="wait">
         {active ? (
-          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={() => setActive(null)} onSearch={openSearch} onHistory={setHistory} />
+          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={closePlayer} onSearch={openSearch} onHistory={setHistory} />
         ) : (
           <motion.div key="catalog" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <SecretHeader view={view} onView={changeView} onSearch={openSearch} onHome={goHome} />
