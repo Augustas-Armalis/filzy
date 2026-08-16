@@ -15,6 +15,7 @@ import {
   Film,
   LoaderCircle,
   Maximize2,
+  Minimize2,
   Pause,
   Play,
   Rewind,
@@ -494,10 +495,13 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const [details, setDetails] = useState({ ...media, episodes: [] });
   const [transport, setTransport] = useState({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
   const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
+  const [isImmersive, setIsImmersive] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [seekPreview, setSeekPreview] = useState(null);
   const lastWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
+  const playerStageRef = useRef(null);
   const playerStatusRef = useRef(playerStatus);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
     autoPlay: transport.autoPlay,
@@ -507,7 +511,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     muted: transport.muted,
     poster: false,
     startAt: transport.startAt,
-    sub: transport.captions ? "en" : undefined,
+    sub: transport.captions ? "en" : "off",
     theme: "FFFFFF",
     volume: transport.volume,
   }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.muted, transport.startAt, transport.volume]);
@@ -594,8 +598,9 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
-    const receive = ({ origin, data }) => {
+    const receive = ({ origin, data, source }) => {
       if (origin !== VIDUP_ORIGIN || !data) return;
+      if (source !== playerFrameRef.current?.contentWindow) return;
       if (data.type === "MEDIA_DATA") { window.localStorage.setItem(VIDUP_PROGRESS_KEY, JSON.stringify(data.data)); return; }
       if (data.type !== "PLAYER_EVENT" || !data.data) return;
       const currentTime = Math.max(0, Number(data.data.currentTime) || 0); const duration = Math.max(0, Number(data.data.duration) || 0);
@@ -620,15 +625,36 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
   }, [details, media, onHistory, updatePlayerStatus]);
   const toggleFullscreen = useCallback(async () => {
-    const shell = playerShellRef.current;
-    if (!shell) return;
+    const stage = playerStageRef.current;
+    if (!stage) return;
+    if (isImmersive) {
+      setIsImmersive(false);
+      return;
+    }
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await shell.requestFullscreen();
+      else if (typeof stage.requestFullscreen === "function") {
+        await stage.requestFullscreen({ navigationUI: "hide" });
+        if (document.fullscreenElement !== stage) setIsImmersive(true);
+      }
+      else setIsImmersive(true);
     } catch {
-      // The native player fullscreen control remains available when the host request is denied.
+      setIsImmersive(true);
     }
+  }, [isImmersive]);
+  useEffect(() => {
+    const syncFullscreen = () => {
+      const nativeActive = document.fullscreenElement === playerStageRef.current;
+      setIsNativeFullscreen(nativeActive);
+      if (nativeActive) setIsImmersive(false);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
   }, []);
+  useEffect(() => {
+    document.documentElement.classList.toggle("movie-immersive-open", isImmersive);
+    return () => document.documentElement.classList.remove("movie-immersive-open");
+  }, [isImmersive]);
   const forcePlayerFocus = useCallback(() => {
     window.requestAnimationFrame(() => playerFrameRef.current?.focus({ preventScroll: true }));
   }, []);
@@ -660,8 +686,13 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   useEffect(() => {
     const shortcut = (event) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button")) return;
       const key = event.key.toLowerCase();
+      if (key === "escape" && isImmersive) {
+        event.preventDefault();
+        setIsImmersive(false);
+        return;
+      }
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button")) return;
       const actions = {
         " ": togglePlayback,
         arrowleft: () => seekBy(-10),
@@ -676,7 +707,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [seekBy, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
+  }, [isImmersive, seekBy, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -692,32 +723,33 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             <RatingMark rating={details.rating} detailed />
           </div>
         </div>
-        <div
-          ref={playerShellRef}
-          className="movie-player-shell"
-          onPointerEnter={focusPlayer}
-        >
-          <div className="movie-player-shell__screen">
-            <iframe
-              key={`player-${transport.sequence}-${playerUrl}`}
-              ref={playerFrameRef}
-              src={playerUrl}
-              title={`${details.title || media.title} player`}
-              width="100%"
-              height="100%"
-              frameBorder="0"
-              tabIndex={0}
-              aria-keyshortcuts="Space ArrowLeft ArrowRight F M C"
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
-              allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={focusPlayer}
-            />
-            <div className="movie-player-shell__reflection" aria-hidden="true" />
-            <div className="movie-player-shell__native-chrome" aria-hidden="true" />
+        <div ref={playerStageRef} className={cn("movie-player-stage", isImmersive && "is-immersive")}>
+          <div
+            ref={playerShellRef}
+            className="movie-player-shell"
+            onPointerEnter={focusPlayer}
+          >
+            <div className="movie-player-shell__screen">
+              <iframe
+                key={`player-${transport.sequence}-${playerUrl}`}
+                ref={playerFrameRef}
+                src={playerUrl}
+                title={`${details.title || media.title} player`}
+                width="100%"
+                height="100%"
+                frameBorder="0"
+                tabIndex={0}
+                aria-keyshortcuts="Space ArrowLeft ArrowRight F M C"
+                allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+                onLoad={focusPlayer}
+              />
+              <div className="movie-player-shell__reflection" aria-hidden="true" />
+              <div className="movie-player-shell__native-chrome" aria-hidden="true" />
+            </div>
           </div>
-        </div>
-        <div className="movie-player-commandbar" aria-label="Playback controls">
+          <div className="movie-player-commandbar" aria-label="Playback controls">
           <div className="movie-player-commandbar__timeline">
             <span>{formatRuntime(seekPreview ?? playerStatus.currentTime)}</span>
             <input
@@ -756,7 +788,11 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
               <span><strong>Captions</strong><small>{transport.captions ? "English on" : "Off"}</small></span>
             </button>
           </div>
-          <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label="Open player fullscreen" aria-keyshortcuts="f" title="Fullscreen"><Maximize2 {...iconProps} /><span><strong>Fullscreen</strong><small>Open player</small></span></button>
+            <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label={isImmersive || isNativeFullscreen ? "Exit fullscreen" : "Open player fullscreen"} aria-keyshortcuts="f" title={isImmersive || isNativeFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+              {isImmersive || isNativeFullscreen ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
+              <span><strong>{isImmersive || isNativeFullscreen ? "Exit" : "Fullscreen"}</strong><small>{isImmersive || isNativeFullscreen ? "Close player" : "Open player"}</small></span>
+            </button>
+          </div>
         </div>
         <section className="movie-player-about">
           <div className="movie-player-about__overview"><p>{details.detail || "Selected from the private catalog."}</p></div>
