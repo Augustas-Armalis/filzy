@@ -261,8 +261,6 @@ export function buildPlayerUrl(media, options = {}) {
   if (options.hideServer === true) params.set("hideServer", "true");
   if (options.fullscreenButton === false) params.set("fullscreenButton", "false");
   if (options.chromecast === false) params.set("chromecast", "false");
-  if (typeof options.muted === "boolean") params.set("muted", String(options.muted));
-  if (Number.isFinite(options.volume)) params.set("volume", String(Math.max(0, Math.min(1, options.volume))));
   if (options.sub) params.set("sub", options.sub);
   return `${VIDUP_ORIGIN}${path}?${params.toString()}`;
 }

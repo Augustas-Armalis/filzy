@@ -496,6 +496,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const [transport, setTransport] = useState({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
   const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
   const [isImmersive, setIsImmersive] = useState(false);
+  const [isMobilePlayer, setIsMobilePlayer] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [seekPreview, setSeekPreview] = useState(null);
   const lastWrite = useRef(0);
@@ -506,15 +507,21 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
     autoPlay: transport.autoPlay,
     chromecast: true,
-    fullscreenButton: false,
+    fullscreenButton: isMobilePlayer,
     hideServer: false,
-    muted: transport.muted,
     poster: false,
     startAt: transport.startAt,
     sub: transport.captions ? "en" : "off",
     theme: "FFFFFF",
-    volume: transport.volume,
-  }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.muted, transport.startAt, transport.volume]);
+  }), [isMobilePlayer, media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.startAt]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 720px)");
+    const syncMobilePlayer = () => setIsMobilePlayer(query.matches);
+    syncMobilePlayer();
+    query.addEventListener?.("change", syncMobilePlayer);
+    return () => query.removeEventListener?.("change", syncMobilePlayer);
+  }, []);
 
   const updatePlayerStatus = useCallback((patch) => {
     playerStatusRef.current = { ...playerStatusRef.current, ...patch };
@@ -561,21 +568,24 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
 
   const toggleMuted = useCallback(() => {
     const nextMuted = !playerStatusRef.current.muted;
-    sendPlayerCommand("mute", { muted: nextMuted });
-    remountPlayer({ autoPlay: playerStatusRef.current.playing, muted: nextMuted });
-  }, [remountPlayer, sendPlayerCommand]);
+    sendPlayerCommand("mute", { muted: nextMuted, value: nextMuted });
+    updatePlayerStatus({ muted: nextMuted });
+    setTransport((current) => ({ ...current, muted: nextMuted }));
+    window.setTimeout(() => sendPlayerCommand("getStatus"), 120);
+  }, [sendPlayerCommand, updatePlayerStatus]);
 
   const changeVolume = useCallback((value) => {
     const nextVolume = Math.max(0, Math.min(1, Number(value) || 0));
     const nextMuted = nextVolume === 0;
     sendPlayerCommand("volume", { value: nextVolume, volume: nextVolume });
+    if (playerStatusRef.current.muted !== nextMuted) sendPlayerCommand("mute", { muted: nextMuted, value: nextMuted });
     updatePlayerStatus({ muted: nextMuted, volume: nextVolume });
+    setTransport((current) => ({ ...current, muted: nextMuted, volume: nextVolume }));
   }, [sendPlayerCommand, updatePlayerStatus]);
 
-  const commitVolume = useCallback(() => {
-    const status = playerStatusRef.current;
-    remountPlayer({ autoPlay: status.playing, muted: status.muted, volume: status.volume });
-  }, [remountPlayer]);
+  const syncVolume = useCallback(() => {
+    sendPlayerCommand("getStatus");
+  }, [sendPlayerCommand]);
 
   const toggleCaptions = useCallback(() => {
     const nextCaptions = !transport.captions;
@@ -779,9 +789,21 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             <div className="movie-player-volume">
               <button type="button" className={cn("movie-player-command", playerStatus.muted && "is-active")} onClick={toggleMuted} aria-label={playerStatus.muted ? "Unmute video" : "Mute video"} aria-pressed={playerStatus.muted} aria-keyshortcuts="m" title={playerStatus.muted ? "Unmute" : "Mute"}>
                 {playerStatus.muted ? <VolumeX {...iconProps} /> : <Volume2 {...iconProps} />}
-                <span><strong>{playerStatus.muted ? "Unmute" : "Volume"}</strong><small>{Math.round(playerStatus.volume * 100)}%</small></span>
+                <span><strong>{playerStatus.muted ? "Unmute" : "Volume"}</strong><small>{playerStatus.muted ? "Muted" : `${Math.round(playerStatus.volume * 100)}%`}</small></span>
               </button>
-              <input type="range" min="0" max="1" step="0.05" value={playerStatus.volume} aria-label="Video volume" onChange={(event) => changeVolume(event.target.value)} onPointerUp={commitVolume} onKeyUp={commitVolume} />
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={playerStatus.muted ? 0 : playerStatus.volume}
+                aria-label="Video volume"
+                aria-valuetext={playerStatus.muted ? "Muted" : `${Math.round(playerStatus.volume * 100)} percent`}
+                style={{ "--movie-volume": `${playerStatus.muted ? 0 : Math.round(playerStatus.volume * 100)}%` }}
+                onChange={(event) => changeVolume(event.target.value)}
+                onPointerUp={syncVolume}
+                onKeyUp={syncVolume}
+              />
             </div>
             <button type="button" className={cn("movie-player-command", transport.captions && "is-active")} onClick={toggleCaptions} aria-label={transport.captions ? "Turn captions off" : "Turn English captions on"} aria-pressed={transport.captions} aria-keyshortcuts="c" title={transport.captions ? "Captions off" : "English captions on"}>
               {transport.captions ? <Captions {...iconProps} /> : <CaptionsOff {...iconProps} />}
