@@ -11,6 +11,9 @@ import {
   ChevronRight,
   Film,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
+  Pause,
   Play,
   Search,
   Star,
@@ -483,16 +486,59 @@ function EpisodeShelf({ media, details, onEpisode }) {
 
 function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
+  const [transport, setTransport] = useState({ autoPlay: true, sequence: 0, startAt: 0 });
+  const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const lastWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
+  const playerStatusRef = useRef(playerStatus);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
-    autoPlay: true,
+    autoPlay: transport.autoPlay,
     chromecast: true,
     hideServer: false,
     poster: false,
+    startAt: transport.startAt,
     theme: "FFFFFF",
-  }), [media.episode, media.id, media.mediaType, media.season]);
+  }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.startAt]);
+
+  const updatePlayerStatus = useCallback((patch) => {
+    playerStatusRef.current = { ...playerStatusRef.current, ...patch };
+    setPlayerStatus(playerStatusRef.current);
+  }, []);
+  const sendPlayerCommand = useCallback((command, payload = {}) => {
+    playerFrameRef.current?.contentWindow?.postMessage({ command, ...payload }, VIDUP_ORIGIN);
+  }, []);
+  const remountPlayer = useCallback((autoPlay) => {
+    const startAt = Math.max(0, Math.min(
+      playerStatusRef.current.duration || Number.POSITIVE_INFINITY,
+      playerStatusRef.current.currentTime || 0,
+    ));
+    setTransport((current) => ({ autoPlay, sequence: current.sequence + 1, startAt }));
+    updatePlayerStatus({ currentTime: startAt, playing: autoPlay });
+  }, [updatePlayerStatus]);
+  const togglePlayback = useCallback(() => {
+    const shouldPlay = !playerStatusRef.current.playing;
+    sendPlayerCommand(shouldPlay ? "play" : "pause");
+    remountPlayer(shouldPlay);
+  }, [remountPlayer, sendPlayerCommand]);
+  const toggleFullscreen = useCallback(async () => {
+    const frame = playerFrameRef.current;
+    if (!frame) return;
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fullscreenElement) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else document.webkitExitFullscreen?.();
+      return;
+    }
+    try {
+      if (frame.requestFullscreen) await frame.requestFullscreen({ navigationUI: "hide" });
+      else if (frame.webkitRequestFullscreen) frame.webkitRequestFullscreen();
+      else sendPlayerCommand("fullscreen");
+    } catch {
+      sendPlayerCommand("fullscreen");
+    }
+  }, [sendPlayerCommand]);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
@@ -509,6 +555,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         playing: Boolean(data.data.playing),
         volume: Math.max(0, Math.min(1, Number(data.data.volume) || 0)),
       };
+      updatePlayerStatus(nextStatus);
       if (playerShellRef.current) {
         playerShellRef.current.dataset.currentTime = String(nextStatus.currentTime);
         playerShellRef.current.dataset.duration = String(nextStatus.duration);
@@ -520,7 +567,22 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       onHistory(saveMovieHistory({ ...media, ...details, progress: { watched: currentTime, duration } }));
     };
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
-  }, [details, media, onHistory]);
+  }, [details, media, onHistory, updatePlayerStatus]);
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen((document.fullscreenElement || document.webkitFullscreenElement) === playerFrameRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    document.addEventListener("webkitfullscreenchange", syncFullscreen);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreen);
+    };
+  }, []);
+  useEffect(() => {
+    playerStatusRef.current = { currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 };
+    setPlayerStatus(playerStatusRef.current);
+    setTransport({ autoPlay: true, sequence: 0, startAt: 0 });
+    setIsFullscreen(false);
+  }, [media.episode, media.id, media.mediaType, media.season]);
   const forcePlayerFocus = useCallback(() => {
     window.requestAnimationFrame(() => playerFrameRef.current?.focus({ preventScroll: true }));
   }, []);
@@ -545,6 +607,14 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
           <div><TypeMark type={media.mediaType} /><h1>{details.title || media.title}</h1></div>
           <div className="movie-player-titlebar__actions">
             {[details.year, details.runtime].filter(Boolean).map((item) => <span key={item}>{item}</span>)}
+            <div className="movie-player-titlebar__controls" aria-label="Playback controls">
+              <button type="button" onClick={togglePlayback} aria-label={playerStatus.playing ? "Pause video" : "Play video"} aria-pressed={playerStatus.playing} title={playerStatus.playing ? "Pause" : "Play"}>
+                {playerStatus.playing ? <Pause size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /> : <Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" />}
+              </button>
+              <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} aria-pressed={isFullscreen} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                {isFullscreen ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
+              </button>
+            </div>
             <RatingMark rating={details.rating} detailed />
           </div>
         </div>
@@ -556,6 +626,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
           >
             <div className="movie-player-shell__screen">
               <iframe
+                key={`player-${transport.sequence}-${playerUrl}`}
                 ref={playerFrameRef}
                 src={playerUrl}
                 title={`${details.title || media.title} player`}
@@ -567,7 +638,10 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
                 allowFullScreen
                 referrerPolicy="strict-origin-when-cross-origin"
-                onLoad={focusPlayer}
+                onLoad={() => {
+                  focusPlayer();
+                  window.setTimeout(() => sendPlayerCommand("getStatus"), 350);
+                }}
               />
               <div className="movie-player-shell__reflection" aria-hidden="true" />
             </div>
