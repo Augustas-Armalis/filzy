@@ -1222,7 +1222,7 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
   .movie-search-result h3 { font-size: 19px; }
   .movie-player-main { padding: max(104px, calc(env(safe-area-inset-top) + 90px)) var(--movie-gutter) 70px; }
   .movie-player-titlebar { grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px 12px; margin: 12px 4px 16px; }
-  .movie-player-titlebar__actions { display: flex; width: 100%; grid-column: 1 / -1; justify-content: space-between; gap: 10px; padding: 0; }
+  .movie-player-titlebar__actions { display: flex; width: 100%; grid-column: 1 / -1; justify-content: flex-end; gap: 6px; padding: 0; }
   .movie-player-titlebar__actions > span:not(.movie-rating-mark) { display: none; }
   .movie-player-titlebar__controls { gap: 3px; }
   .movie-player-titlebar__controls button { width: 44px; height: 44px; border-radius: 12px; touch-action: manipulation; }
