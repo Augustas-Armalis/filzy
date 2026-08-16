@@ -21,6 +21,12 @@ describe("movie player helpers", () => {
       .toContain("sub=en");
   });
 
+  it("passes external sound preferences to the player", () => {
+    const url = buildPlayerUrl({ id: "tt1375666", mediaType: "movie" }, { muted: false, volume: 0.8 });
+    expect(url).toContain("muted=false");
+    expect(url).toContain("volume=0.8");
+  });
+
   it("parses identifiers and complete player URLs", () => {
     expect(parseMediaInput("tt6263850", "movie")).toMatchObject({ id: "tt6263850", mediaType: "movie" });
     expect(parseMediaInput("63174", "tv")).toMatchObject({ id: "63174", mediaType: "tv", season: 1, episode: 1 });

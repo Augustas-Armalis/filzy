@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Captions,
+  CaptionsOff,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -14,12 +15,14 @@ import {
   Film,
   LoaderCircle,
   Maximize2,
+  Pause,
   Play,
   Rewind,
   Search,
   Star,
   Tv2,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import {
@@ -27,6 +30,7 @@ import {
   FEATURED_MEDIA,
   fetchCatalogPage,
   fetchMediaDetails,
+  formatRuntime,
   loadMovieHistory,
   parseMediaInput,
   saveMovieHistory,
@@ -45,17 +49,6 @@ const TYPES = [
 ];
 
 const iconProps = { size: 16, strokeWidth: 1.35, absoluteStrokeWidth: true, "aria-hidden": true };
-const VIDUP_POPUP_SHIELD_KEY = "augustas-films:vidup-popup-shield";
-const VIDUP_POPUP_SHIELD_TTL = 50 * 60 * 1000;
-
-function needsPopupShield() {
-  try {
-    const lastActivation = Number(window.localStorage.getItem(VIDUP_POPUP_SHIELD_KEY)) || 0;
-    return Date.now() - lastActivation > VIDUP_POPUP_SHIELD_TTL;
-  } catch {
-    return true;
-  }
-}
 
 function progressRatio(progress) {
   const duration = Number(progress?.duration) || 0;
@@ -499,46 +492,105 @@ function EpisodeShelf({ media, details, onEpisode }) {
 
 function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
-  const [popupShieldArmed, setPopupShieldArmed] = useState(needsPopupShield);
+  const [transport, setTransport] = useState({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
+  const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
+  const [seekPreview, setSeekPreview] = useState(null);
   const lastWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
-  const popupShieldActivating = useRef(false);
+  const playerStatusRef = useRef(playerStatus);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
-    autoPlay: true,
+    autoPlay: transport.autoPlay,
     chromecast: true,
     fullscreenButton: false,
     hideServer: false,
+    muted: transport.muted,
     poster: false,
+    startAt: transport.startAt,
+    sub: transport.captions ? "en" : undefined,
     theme: "FFFFFF",
-  }), [media.episode, media.id, media.mediaType, media.season]);
+    volume: transport.volume,
+  }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.muted, transport.startAt, transport.volume]);
 
-  const activatePopupShield = useCallback(() => {
-    if (!popupShieldArmed || popupShieldActivating.current) return;
-    popupShieldActivating.current = true;
+  const updatePlayerStatus = useCallback((patch) => {
+    playerStatusRef.current = { ...playerStatusRef.current, ...patch };
+    setPlayerStatus((current) => ({ ...current, ...patch }));
+  }, []);
 
-    window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(VIDUP_POPUP_SHIELD_KEY, String(Date.now()));
-      } catch {
-        // The shield still protects this launch when host storage is unavailable.
-      }
-      setPopupShieldArmed(false);
-    }, 180);
-  }, [popupShieldArmed]);
+  const sendPlayerCommand = useCallback((command, payload = {}) => {
+    playerFrameRef.current?.contentWindow?.postMessage({ command, ...payload }, VIDUP_ORIGIN);
+  }, []);
+
+  const remountPlayer = useCallback((overrides = {}) => {
+    const status = playerStatusRef.current;
+    const nextStartAt = Math.max(0, Math.min(
+      status.duration || Number.POSITIVE_INFINITY,
+      Number(overrides.startAt ?? status.currentTime) || 0,
+    ));
+    setSeekPreview(null);
+    setTransport((current) => ({
+      ...current,
+      ...overrides,
+      startAt: nextStartAt,
+      sequence: current.sequence + 1,
+    }));
+    updatePlayerStatus({
+      currentTime: nextStartAt,
+      ...(typeof overrides.autoPlay === "boolean" ? { playing: overrides.autoPlay } : {}),
+      ...(typeof overrides.muted === "boolean" ? { muted: overrides.muted } : {}),
+      ...(Number.isFinite(overrides.volume) ? { volume: overrides.volume } : {}),
+    });
+  }, [updatePlayerStatus]);
+
+  const togglePlayback = useCallback(() => {
+    const nextPlaying = !playerStatusRef.current.playing;
+    sendPlayerCommand(nextPlaying ? "play" : "pause");
+    remountPlayer({ autoPlay: nextPlaying });
+  }, [remountPlayer, sendPlayerCommand]);
+
+  const seekBy = useCallback((seconds) => {
+    const status = playerStatusRef.current;
+    const nextTime = Math.max(0, Math.min(status.duration || Number.POSITIVE_INFINITY, status.currentTime + seconds));
+    sendPlayerCommand("seek", { currentTime: nextTime, time: nextTime });
+    remountPlayer({ autoPlay: status.playing, startAt: nextTime });
+  }, [remountPlayer, sendPlayerCommand]);
+
+  const toggleMuted = useCallback(() => {
+    const nextMuted = !playerStatusRef.current.muted;
+    sendPlayerCommand("mute", { muted: nextMuted });
+    remountPlayer({ autoPlay: playerStatusRef.current.playing, muted: nextMuted });
+  }, [remountPlayer, sendPlayerCommand]);
+
+  const changeVolume = useCallback((value) => {
+    const nextVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    const nextMuted = nextVolume === 0;
+    sendPlayerCommand("volume", { value: nextVolume, volume: nextVolume });
+    updatePlayerStatus({ muted: nextMuted, volume: nextVolume });
+  }, [sendPlayerCommand, updatePlayerStatus]);
+
+  const commitVolume = useCallback(() => {
+    const status = playerStatusRef.current;
+    remountPlayer({ autoPlay: status.playing, muted: status.muted, volume: status.volume });
+  }, [remountPlayer]);
+
+  const toggleCaptions = useCallback(() => {
+    const nextCaptions = !transport.captions;
+    remountPlayer({ autoPlay: playerStatusRef.current.playing, captions: nextCaptions });
+  }, [remountPlayer, transport.captions]);
+
+  const commitSeek = useCallback(() => {
+    if (seekPreview === null) return;
+    sendPlayerCommand("seek", { currentTime: seekPreview, time: seekPreview });
+    remountPlayer({ autoPlay: playerStatusRef.current.playing, startAt: seekPreview });
+  }, [remountPlayer, seekPreview, sendPlayerCommand]);
 
   useEffect(() => {
-    if (!popupShieldArmed) return undefined;
-    const detectPlayerActivation = () => {
-      if (document.activeElement === playerFrameRef.current) activatePopupShield();
-    };
-    const interval = window.setInterval(detectPlayerActivation, 80);
-    window.addEventListener("blur", detectPlayerActivation);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("blur", detectPlayerActivation);
-    };
-  }, [activatePopupShield, popupShieldArmed]);
+    const initial = { currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 };
+    playerStatusRef.current = initial;
+    setPlayerStatus(initial);
+    setSeekPreview(null);
+    setTransport({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
+  }, [media.episode, media.id, media.mediaType, media.season]);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
@@ -554,6 +606,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         playing: Boolean(data.data.playing),
         volume: Math.max(0, Math.min(1, Number(data.data.volume) || 0)),
       };
+      updatePlayerStatus(nextStatus);
       if (playerShellRef.current) {
         playerShellRef.current.dataset.currentTime = String(nextStatus.currentTime);
         playerShellRef.current.dataset.duration = String(nextStatus.duration);
@@ -565,7 +618,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       onHistory(saveMovieHistory({ ...media, ...details, progress: { watched: currentTime, duration } }));
     };
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
-  }, [details, media, onHistory]);
+  }, [details, media, onHistory, updatePlayerStatus]);
   const toggleFullscreen = useCallback(async () => {
     const shell = playerShellRef.current;
     if (!shell) return;
@@ -577,15 +630,13 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     }
   }, []);
   const forcePlayerFocus = useCallback(() => {
-    if (popupShieldArmed) return;
     window.requestAnimationFrame(() => playerFrameRef.current?.focus({ preventScroll: true }));
-  }, [popupShieldArmed]);
+  }, []);
   const focusPlayer = useCallback(() => {
-    if (popupShieldArmed || searchOpen || document.querySelector(".movie-search-overlay")) return;
+    if (searchOpen || document.querySelector(".movie-search-overlay")) return;
     forcePlayerFocus();
-  }, [forcePlayerFocus, popupShieldArmed, searchOpen]);
+  }, [forcePlayerFocus, searchOpen]);
   useEffect(() => {
-    if (popupShieldArmed) return undefined;
     const restorePlayerFocus = (event) => {
       if (document.querySelector(".movie-search-overlay")) {
         if (event.target instanceof Element && event.target.closest("[aria-label='Close search'], .movie-search-overlay__backdrop")) forcePlayerFocus();
@@ -600,23 +651,32 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       document.removeEventListener("click", restorePlayerFocus);
       window.removeEventListener("focus", restorePlayerFocus);
     };
-  }, [focusPlayer, forcePlayerFocus, popupShieldArmed]);
+  }, [focusPlayer, forcePlayerFocus]);
   useEffect(() => {
-    if (popupShieldArmed || searchOpen) return undefined;
+    if (searchOpen) return undefined;
     const timer = window.setTimeout(focusPlayer, 360);
     return () => window.clearTimeout(timer);
-  }, [focusPlayer, popupShieldArmed, searchOpen]);
+  }, [focusPlayer, searchOpen]);
   useEffect(() => {
     const shortcut = (event) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "f") return;
       if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button")) return;
+      const key = event.key.toLowerCase();
+      const actions = {
+        " ": togglePlayback,
+        arrowleft: () => seekBy(-10),
+        arrowright: () => seekBy(10),
+        c: toggleCaptions,
+        f: toggleFullscreen,
+        m: toggleMuted,
+      };
+      if (!actions[key]) return;
       event.preventDefault();
-      toggleFullscreen();
+      actions[key]();
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [toggleFullscreen]);
+  }, [seekBy, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -634,46 +694,69 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         </div>
         <div
           ref={playerShellRef}
-          className={cn("movie-player-shell", popupShieldArmed && "is-popup-shield-armed")}
+          className="movie-player-shell"
           onPointerEnter={focusPlayer}
         >
           <div className="movie-player-shell__screen">
             <iframe
-              key={popupShieldArmed ? `shield-${playerUrl}` : `player-${playerUrl}`}
+              key={`player-${transport.sequence}-${playerUrl}`}
               ref={playerFrameRef}
               src={playerUrl}
               title={`${details.title || media.title} player`}
               width="100%"
               height="100%"
               frameBorder="0"
-              tabIndex={popupShieldArmed ? -1 : 0}
-              aria-keyshortcuts="Space ArrowLeft ArrowRight ArrowUp ArrowDown F M"
+              tabIndex={0}
+              aria-keyshortcuts="Space ArrowLeft ArrowRight F M C"
               allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
               allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"
-              sandbox={popupShieldArmed ? "allow-forms allow-same-origin allow-scripts" : undefined}
               onLoad={focusPlayer}
             />
             <div className="movie-player-shell__reflection" aria-hidden="true" />
             <div className="movie-player-shell__native-chrome" aria-hidden="true" />
-            {popupShieldArmed && (
-              <div className="movie-player-start-shield" aria-hidden="true">
-                <span><Play size={22} fill="currentColor" strokeWidth={0} /></span>
-                <strong>Start watching</strong>
-                <small>Protected launch</small>
-              </div>
-            )}
           </div>
         </div>
-        <div className="movie-player-commandbar" aria-label="Playback shortcuts">
-          <div className="movie-player-commandbar__label"><span>Player shortcuts</span><small>Keyboard ready</small></div>
-          <div className="movie-player-commandbar__items">
-            <div className="movie-player-command"><Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /><span><strong>Play / pause</strong><small><kbd>Space</kbd></small></span></div>
-            <div className="movie-player-command"><Volume2 {...iconProps} /><span><strong>Mute / sound</strong><small><kbd>M</kbd></small></span></div>
-            <div className="movie-player-command"><span className="movie-player-command__pair"><Rewind size={13} /><FastForward size={13} /></span><span><strong>Skip 10 seconds</strong><small><kbd>←</kbd><kbd>→</kbd></small></span></div>
-            <div className="movie-player-command"><Captions {...iconProps} /><span><strong>Captions off</strong><small>CC in player</small></span></div>
+        <div className="movie-player-commandbar" aria-label="Playback controls">
+          <div className="movie-player-commandbar__timeline">
+            <span>{formatRuntime(seekPreview ?? playerStatus.currentTime)}</span>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(1, playerStatus.duration)}
+              step="1"
+              value={Math.min(seekPreview ?? playerStatus.currentTime, Math.max(1, playerStatus.duration))}
+              aria-label="Seek through video"
+              onChange={(event) => setSeekPreview(Number(event.target.value))}
+              onPointerUp={commitSeek}
+              onKeyUp={commitSeek}
+            />
+            <span>{formatRuntime(playerStatus.duration)}</span>
           </div>
-          <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label="Open player fullscreen" aria-keyshortcuts="f" title="Fullscreen (F)"><Maximize2 {...iconProps} /><span><strong>Fullscreen</strong><small>F or click</small></span></button>
+          <div className="movie-player-commandbar__items">
+            <button type="button" className="movie-player-command" onClick={togglePlayback} aria-label={playerStatus.playing ? "Pause video" : "Play video"} aria-keyshortcuts="Space" title={playerStatus.playing ? "Pause" : "Play"}>
+              {playerStatus.playing ? <Pause size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" /> : <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />}
+              <span><strong>{playerStatus.playing ? "Pause" : "Play"}</strong><small>{playerStatus.playing ? "Playing now" : "Paused"}</small></span>
+            </button>
+            <button type="button" className="movie-player-command" onClick={() => seekBy(-10)} aria-label="Skip back 10 seconds" title="Back 10 seconds">
+              <Rewind {...iconProps} /><span><strong>Back 10</strong><small>Skip backward</small></span>
+            </button>
+            <button type="button" className="movie-player-command" onClick={() => seekBy(10)} aria-label="Skip forward 10 seconds" title="Forward 10 seconds">
+              <FastForward {...iconProps} /><span><strong>Forward 10</strong><small>Skip ahead</small></span>
+            </button>
+            <div className="movie-player-volume">
+              <button type="button" className={cn("movie-player-command", playerStatus.muted && "is-active")} onClick={toggleMuted} aria-label={playerStatus.muted ? "Unmute video" : "Mute video"} aria-pressed={playerStatus.muted} aria-keyshortcuts="m" title={playerStatus.muted ? "Unmute" : "Mute"}>
+                {playerStatus.muted ? <VolumeX {...iconProps} /> : <Volume2 {...iconProps} />}
+                <span><strong>{playerStatus.muted ? "Unmute" : "Volume"}</strong><small>{Math.round(playerStatus.volume * 100)}%</small></span>
+              </button>
+              <input type="range" min="0" max="1" step="0.05" value={playerStatus.volume} aria-label="Video volume" onChange={(event) => changeVolume(event.target.value)} onPointerUp={commitVolume} onKeyUp={commitVolume} />
+            </div>
+            <button type="button" className={cn("movie-player-command", transport.captions && "is-active")} onClick={toggleCaptions} aria-label={transport.captions ? "Turn captions off" : "Turn English captions on"} aria-pressed={transport.captions} aria-keyshortcuts="c" title={transport.captions ? "Captions off" : "English captions on"}>
+              {transport.captions ? <Captions {...iconProps} /> : <CaptionsOff {...iconProps} />}
+              <span><strong>Captions</strong><small>{transport.captions ? "English on" : "Off"}</small></span>
+            </button>
+          </div>
+          <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label="Open player fullscreen" aria-keyshortcuts="f" title="Fullscreen"><Maximize2 {...iconProps} /><span><strong>Fullscreen</strong><small>Open player</small></span></button>
         </div>
         <section className="movie-player-about">
           <div className="movie-player-about__overview"><p>{details.detail || "Selected from the private catalog."}</p></div>
