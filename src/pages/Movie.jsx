@@ -6,24 +6,15 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
-  Captions,
-  CaptionsOff,
   Check,
   ChevronLeft,
   ChevronRight,
-  FastForward,
   Film,
   LoaderCircle,
-  Maximize2,
-  Minimize2,
-  Pause,
   Play,
-  Rewind,
   Search,
   Star,
   Tv2,
-  Volume2,
-  VolumeX,
   X,
 } from "lucide-react";
 import {
@@ -31,7 +22,6 @@ import {
   FEATURED_MEDIA,
   fetchCatalogPage,
   fetchMediaDetails,
-  formatRuntime,
   loadMovieHistory,
   parseMediaInput,
   saveMovieHistory,
@@ -493,118 +483,16 @@ function EpisodeShelf({ media, details, onEpisode }) {
 
 function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
-  const [transport, setTransport] = useState({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
-  const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
-  const [isImmersive, setIsImmersive] = useState(false);
-  const [isMobilePlayer, setIsMobilePlayer] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches);
-  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
-  const [seekPreview, setSeekPreview] = useState(null);
   const lastWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
-  const playerStageRef = useRef(null);
-  const playerStatusRef = useRef(playerStatus);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
-    autoPlay: transport.autoPlay,
+    autoPlay: false,
     chromecast: true,
-    fullscreenButton: isMobilePlayer,
     hideServer: false,
-    poster: false,
-    startAt: transport.startAt,
-    sub: transport.captions ? "en" : "off",
+    poster: true,
     theme: "FFFFFF",
-  }), [isMobilePlayer, media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.startAt]);
-
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 720px)");
-    const syncMobilePlayer = () => setIsMobilePlayer(query.matches);
-    syncMobilePlayer();
-    query.addEventListener?.("change", syncMobilePlayer);
-    return () => query.removeEventListener?.("change", syncMobilePlayer);
-  }, []);
-
-  const updatePlayerStatus = useCallback((patch) => {
-    playerStatusRef.current = { ...playerStatusRef.current, ...patch };
-    setPlayerStatus((current) => ({ ...current, ...patch }));
-  }, []);
-
-  const sendPlayerCommand = useCallback((command, payload = {}) => {
-    playerFrameRef.current?.contentWindow?.postMessage({ command, ...payload }, VIDUP_ORIGIN);
-  }, []);
-
-  const remountPlayer = useCallback((overrides = {}) => {
-    const status = playerStatusRef.current;
-    const nextStartAt = Math.max(0, Math.min(
-      status.duration || Number.POSITIVE_INFINITY,
-      Number(overrides.startAt ?? status.currentTime) || 0,
-    ));
-    setSeekPreview(null);
-    setTransport((current) => ({
-      ...current,
-      ...overrides,
-      startAt: nextStartAt,
-      sequence: current.sequence + 1,
-    }));
-    updatePlayerStatus({
-      currentTime: nextStartAt,
-      ...(typeof overrides.autoPlay === "boolean" ? { playing: overrides.autoPlay } : {}),
-      ...(typeof overrides.muted === "boolean" ? { muted: overrides.muted } : {}),
-      ...(Number.isFinite(overrides.volume) ? { volume: overrides.volume } : {}),
-    });
-  }, [updatePlayerStatus]);
-
-  const togglePlayback = useCallback(() => {
-    const nextPlaying = !playerStatusRef.current.playing;
-    sendPlayerCommand(nextPlaying ? "play" : "pause");
-    remountPlayer({ autoPlay: nextPlaying });
-  }, [remountPlayer, sendPlayerCommand]);
-
-  const seekBy = useCallback((seconds) => {
-    const status = playerStatusRef.current;
-    const nextTime = Math.max(0, Math.min(status.duration || Number.POSITIVE_INFINITY, status.currentTime + seconds));
-    sendPlayerCommand("seek", { currentTime: nextTime, time: nextTime });
-    remountPlayer({ autoPlay: status.playing, startAt: nextTime });
-  }, [remountPlayer, sendPlayerCommand]);
-
-  const toggleMuted = useCallback(() => {
-    const nextMuted = !playerStatusRef.current.muted;
-    sendPlayerCommand("mute", { muted: nextMuted, value: nextMuted });
-    updatePlayerStatus({ muted: nextMuted });
-    setTransport((current) => ({ ...current, muted: nextMuted }));
-    window.setTimeout(() => sendPlayerCommand("getStatus"), 120);
-  }, [sendPlayerCommand, updatePlayerStatus]);
-
-  const changeVolume = useCallback((value) => {
-    const nextVolume = Math.max(0, Math.min(1, Number(value) || 0));
-    const nextMuted = nextVolume === 0;
-    sendPlayerCommand("volume", { value: nextVolume, volume: nextVolume });
-    if (playerStatusRef.current.muted !== nextMuted) sendPlayerCommand("mute", { muted: nextMuted, value: nextMuted });
-    updatePlayerStatus({ muted: nextMuted, volume: nextVolume });
-    setTransport((current) => ({ ...current, muted: nextMuted, volume: nextVolume }));
-  }, [sendPlayerCommand, updatePlayerStatus]);
-
-  const syncVolume = useCallback(() => {
-    sendPlayerCommand("getStatus");
-  }, [sendPlayerCommand]);
-
-  const toggleCaptions = useCallback(() => {
-    const nextCaptions = !transport.captions;
-    remountPlayer({ autoPlay: playerStatusRef.current.playing, captions: nextCaptions });
-  }, [remountPlayer, transport.captions]);
-
-  const commitSeek = useCallback(() => {
-    if (seekPreview === null) return;
-    sendPlayerCommand("seek", { currentTime: seekPreview, time: seekPreview });
-    remountPlayer({ autoPlay: playerStatusRef.current.playing, startAt: seekPreview });
-  }, [remountPlayer, seekPreview, sendPlayerCommand]);
-
-  useEffect(() => {
-    const initial = { currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 };
-    playerStatusRef.current = initial;
-    setPlayerStatus(initial);
-    setSeekPreview(null);
-    setTransport({ autoPlay: true, captions: false, muted: false, sequence: 0, startAt: 0, volume: 1 });
-  }, [media.episode, media.id, media.mediaType, media.season]);
+  }), [media.episode, media.id, media.mediaType, media.season]);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
@@ -621,7 +509,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         playing: Boolean(data.data.playing),
         volume: Math.max(0, Math.min(1, Number(data.data.volume) || 0)),
       };
-      updatePlayerStatus(nextStatus);
       if (playerShellRef.current) {
         playerShellRef.current.dataset.currentTime = String(nextStatus.currentTime);
         playerShellRef.current.dataset.duration = String(nextStatus.duration);
@@ -633,38 +520,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       onHistory(saveMovieHistory({ ...media, ...details, progress: { watched: currentTime, duration } }));
     };
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
-  }, [details, media, onHistory, updatePlayerStatus]);
-  const toggleFullscreen = useCallback(async () => {
-    const stage = playerStageRef.current;
-    if (!stage) return;
-    if (isImmersive) {
-      setIsImmersive(false);
-      return;
-    }
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if (typeof stage.requestFullscreen === "function") {
-        await stage.requestFullscreen({ navigationUI: "hide" });
-        if (document.fullscreenElement !== stage) setIsImmersive(true);
-      }
-      else setIsImmersive(true);
-    } catch {
-      setIsImmersive(true);
-    }
-  }, [isImmersive]);
-  useEffect(() => {
-    const syncFullscreen = () => {
-      const nativeActive = document.fullscreenElement === playerStageRef.current;
-      setIsNativeFullscreen(nativeActive);
-      if (nativeActive) setIsImmersive(false);
-    };
-    document.addEventListener("fullscreenchange", syncFullscreen);
-    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
-  }, []);
-  useEffect(() => {
-    document.documentElement.classList.toggle("movie-immersive-open", isImmersive);
-    return () => document.documentElement.classList.remove("movie-immersive-open");
-  }, [isImmersive]);
+  }, [details, media, onHistory]);
   const forcePlayerFocus = useCallback(() => {
     window.requestAnimationFrame(() => playerFrameRef.current?.focus({ preventScroll: true }));
   }, []);
@@ -673,51 +529,10 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     forcePlayerFocus();
   }, [forcePlayerFocus, searchOpen]);
   useEffect(() => {
-    const restorePlayerFocus = (event) => {
-      if (document.querySelector(".movie-search-overlay")) {
-        if (event.target instanceof Element && event.target.closest("[aria-label='Close search'], .movie-search-overlay__backdrop")) forcePlayerFocus();
-        return;
-      }
-      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
-      focusPlayer();
-    };
-    document.addEventListener("click", restorePlayerFocus);
-    window.addEventListener("focus", restorePlayerFocus);
-    return () => {
-      document.removeEventListener("click", restorePlayerFocus);
-      window.removeEventListener("focus", restorePlayerFocus);
-    };
-  }, [focusPlayer, forcePlayerFocus]);
-  useEffect(() => {
     if (searchOpen) return undefined;
     const timer = window.setTimeout(focusPlayer, 360);
     return () => window.clearTimeout(timer);
   }, [focusPlayer, searchOpen]);
-  useEffect(() => {
-    const shortcut = (event) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      const key = event.key.toLowerCase();
-      if (key === "escape" && isImmersive) {
-        event.preventDefault();
-        setIsImmersive(false);
-        return;
-      }
-      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button")) return;
-      const actions = {
-        " ": togglePlayback,
-        arrowleft: () => seekBy(-10),
-        arrowright: () => seekBy(10),
-        c: toggleCaptions,
-        f: toggleFullscreen,
-        m: toggleMuted,
-      };
-      if (!actions[key]) return;
-      event.preventDefault();
-      actions[key]();
-    };
-    window.addEventListener("keydown", shortcut);
-    return () => window.removeEventListener("keydown", shortcut);
-  }, [isImmersive, seekBy, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -733,7 +548,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             <RatingMark rating={details.rating} detailed />
           </div>
         </div>
-        <div ref={playerStageRef} className={cn("movie-player-stage", isImmersive && "is-immersive")}>
+        <div className="movie-player-stage">
           <div
             ref={playerShellRef}
             className="movie-player-shell"
@@ -741,7 +556,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
           >
             <div className="movie-player-shell__screen">
               <iframe
-                key={`player-${transport.sequence}-${playerUrl}`}
                 ref={playerFrameRef}
                 src={playerUrl}
                 title={`${details.title || media.title} player`}
@@ -749,71 +563,15 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
                 height="100%"
                 frameBorder="0"
                 tabIndex={0}
-                aria-keyshortcuts="Space ArrowLeft ArrowRight F M C"
+                aria-keyshortcuts="Space ArrowLeft ArrowRight ArrowUp ArrowDown F M"
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
                 allowFullScreen
+                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
                 referrerPolicy="strict-origin-when-cross-origin"
                 onLoad={focusPlayer}
               />
               <div className="movie-player-shell__reflection" aria-hidden="true" />
-              <div className="movie-player-shell__native-chrome" aria-hidden="true" />
             </div>
-          </div>
-          <div className="movie-player-commandbar" aria-label="Playback controls">
-          <div className="movie-player-commandbar__timeline">
-            <span>{formatRuntime(seekPreview ?? playerStatus.currentTime)}</span>
-            <input
-              type="range"
-              min="0"
-              max={Math.max(1, playerStatus.duration)}
-              step="1"
-              value={Math.min(seekPreview ?? playerStatus.currentTime, Math.max(1, playerStatus.duration))}
-              aria-label="Seek through video"
-              onChange={(event) => setSeekPreview(Number(event.target.value))}
-              onPointerUp={commitSeek}
-              onKeyUp={commitSeek}
-            />
-            <span>{formatRuntime(playerStatus.duration)}</span>
-          </div>
-          <div className="movie-player-commandbar__items">
-            <button type="button" className="movie-player-command" onClick={togglePlayback} aria-label={playerStatus.playing ? "Pause video" : "Play video"} aria-keyshortcuts="Space" title={playerStatus.playing ? "Pause" : "Play"}>
-              {playerStatus.playing ? <Pause size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" /> : <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />}
-              <span><strong>{playerStatus.playing ? "Pause" : "Play"}</strong><small>{playerStatus.playing ? "Playing now" : "Paused"}</small></span>
-            </button>
-            <button type="button" className="movie-player-command" onClick={() => seekBy(-10)} aria-label="Skip back 10 seconds" title="Back 10 seconds">
-              <Rewind {...iconProps} /><span><strong>Back 10</strong><small>Skip backward</small></span>
-            </button>
-            <button type="button" className="movie-player-command" onClick={() => seekBy(10)} aria-label="Skip forward 10 seconds" title="Forward 10 seconds">
-              <FastForward {...iconProps} /><span><strong>Forward 10</strong><small>Skip ahead</small></span>
-            </button>
-            <div className="movie-player-volume">
-              <button type="button" className={cn("movie-player-command", playerStatus.muted && "is-active")} onClick={toggleMuted} aria-label={playerStatus.muted ? "Unmute video" : "Mute video"} aria-pressed={playerStatus.muted} aria-keyshortcuts="m" title={playerStatus.muted ? "Unmute" : "Mute"}>
-                {playerStatus.muted ? <VolumeX {...iconProps} /> : <Volume2 {...iconProps} />}
-                <span><strong>{playerStatus.muted ? "Unmute" : "Volume"}</strong><small>{playerStatus.muted ? "Muted" : `${Math.round(playerStatus.volume * 100)}%`}</small></span>
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={playerStatus.muted ? 0 : playerStatus.volume}
-                aria-label="Video volume"
-                aria-valuetext={playerStatus.muted ? "Muted" : `${Math.round(playerStatus.volume * 100)} percent`}
-                style={{ "--movie-volume": `${playerStatus.muted ? 0 : Math.round(playerStatus.volume * 100)}%` }}
-                onChange={(event) => changeVolume(event.target.value)}
-                onPointerUp={syncVolume}
-                onKeyUp={syncVolume}
-              />
-            </div>
-            <button type="button" className={cn("movie-player-command", transport.captions && "is-active")} onClick={toggleCaptions} aria-label={transport.captions ? "Turn captions off" : "Turn English captions on"} aria-pressed={transport.captions} aria-keyshortcuts="c" title={transport.captions ? "Captions off" : "English captions on"}>
-              {transport.captions ? <Captions {...iconProps} /> : <CaptionsOff {...iconProps} />}
-              <span><strong>Captions</strong><small>{transport.captions ? "English on" : "Off"}</small></span>
-            </button>
-          </div>
-            <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label={isImmersive || isNativeFullscreen ? "Exit fullscreen" : "Open player fullscreen"} aria-keyshortcuts="f" title={isImmersive || isNativeFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-              {isImmersive || isNativeFullscreen ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
-              <span><strong>{isImmersive || isNativeFullscreen ? "Exit" : "Fullscreen"}</strong><small>{isImmersive || isNativeFullscreen ? "Close player" : "Open player"}</small></span>
-            </button>
           </div>
         </div>
         <section className="movie-player-about">

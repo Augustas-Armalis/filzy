@@ -16,6 +16,15 @@ describe("movie player helpers", () => {
       .toBe("https://vidup.to/tv/63174/2/5?autoPlay=true&title=false&poster=true&theme=E7FF6B");
   });
 
+  it("keeps native player controls available for tap-to-play playback", () => {
+    const url = buildPlayerUrl(
+      { id: "tt1375666", mediaType: "movie" },
+      { autoPlay: false, poster: true, theme: "#FFFFFF" },
+    );
+    expect(url).toBe("https://vidup.to/movie/tt1375666?autoPlay=false&title=false&poster=true&theme=FFFFFF");
+    expect(url).not.toContain("fullscreenButton=false");
+  });
+
   it("selects English captions by default when requested", () => {
     expect(buildPlayerUrl({ id: "tt1375666", mediaType: "movie" }, { sub: "en" }))
       .toContain("sub=en");
