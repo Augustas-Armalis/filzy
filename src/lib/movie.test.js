@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { buildPlayerUrl, formatRuntime, parseMediaInput } from "@/lib/movie";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildPlayerUrl, fetchMediaDetails, formatRuntime, parseMediaInput } from "@/lib/movie";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("movie player helpers", () => {
   it("builds a customized movie embed URL", () => {
@@ -31,5 +33,22 @@ describe("movie player helpers", () => {
     expect(formatRuntime(0)).toBe("0:00");
     expect(formatRuntime(125)).toBe("2:05");
     expect(formatRuntime(7667)).toBe("2:07:47");
+  });
+
+  it("returns a YouTube trailer from Cinemeta metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        meta: {
+          id: "tt1375666",
+          type: "movie",
+          name: "Inception",
+          trailerStreams: [{ title: "Official trailer", ytId: "cdx31ak4KbQ" }],
+        },
+      }),
+    }));
+
+    await expect(fetchMediaDetails({ id: "tt1375666", mediaType: "movie", title: "Inception" }))
+      .resolves.toMatchObject({ trailer: { id: "cdx31ak4KbQ", title: "Official trailer" } });
   });
 });

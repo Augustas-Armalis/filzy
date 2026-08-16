@@ -76,10 +76,10 @@ export async function fetchCatalogPage({ page = 0, pageSize = 24, signal } = {})
 }
 
 export async function fetchMediaDetails(media, { signal } = {}) {
-  if (!media?.id || !/^tt\d+$/.test(String(media.id))) return { ...media, episodes: [] };
+  if (!media?.id || !/^tt\d+$/.test(String(media.id))) return { ...media, episodes: [], trailer: null };
   const type = media.mediaType === "tv" ? "series" : "movie";
   const response = await fetch(`${CINEMETA_ORIGIN}/meta/${type}/${encodeURIComponent(media.id)}.json`, { signal });
-  if (!response.ok) return { ...media, episodes: [] };
+  if (!response.ok) return { ...media, episodes: [], trailer: null };
   const data = await response.json();
   const meta = data.meta || data;
   const details = normalizeCinemetaMedia(meta, type) || media;
@@ -93,7 +93,14 @@ export async function fetchMediaDetails(media, { signal } = {}) {
     released: episode.released || episode.firstAired || "",
     rating: episode.rating && episode.rating !== "0" ? episode.rating : "",
   }));
-  return { ...media, ...details, season: media.season || 1, episode: media.episode || 1, episodes };
+  const trailerStream = (meta.trailerStreams || []).find((item) => /^[\w-]{6,}$/.test(String(item?.ytId || "")));
+  const trailerFallback = (meta.trailers || []).find((item) => /^[\w-]{6,}$/.test(String(item?.source || "")));
+  const trailerId = trailerStream?.ytId || trailerFallback?.source || "";
+  const trailer = trailerId ? {
+    id: trailerId,
+    title: trailerStream?.title || `${details.title || media.title} trailer`,
+  } : null;
+  return { ...media, ...details, season: media.season || 1, episode: media.episode || 1, episodes, trailer };
 }
 
 export const FEATURED_MEDIA = [

@@ -6,15 +6,20 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  Captions,
   Check,
   ChevronLeft,
   ChevronRight,
+  FastForward,
   Film,
   LoaderCircle,
+  Maximize2,
   Play,
+  Rewind,
   Search,
   Star,
   Tv2,
+  Volume2,
   X,
 } from "lucide-react";
 import {
@@ -499,19 +504,14 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
   const popupShieldActivating = useRef(false);
-  const saved = savedItemFor(history, media);
-  const sameEpisode = media.mediaType !== "tv" || (saved?.season === media.season && saved?.episode === media.episode);
-  const initialStartAt = sameEpisode && Number(saved?.progress?.watched) > 15 ? saved.progress.watched : 0;
-  const [resumeAt, setResumeAt] = useState(initialStartAt);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
     autoPlay: true,
     chromecast: true,
-    fullscreenButton: true,
+    fullscreenButton: false,
     hideServer: false,
-    startAt: resumeAt,
+    poster: false,
     theme: "FFFFFF",
-    sub: "en",
-  }), [media.episode, media.id, media.mediaType, media.season, resumeAt]);
+  }), [media.episode, media.id, media.mediaType, media.season]);
 
   const activatePopupShield = useCallback(() => {
     if (!popupShieldArmed || popupShieldActivating.current) return;
@@ -541,12 +541,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   }, [activatePopupShield, popupShieldArmed]);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
-  useEffect(() => {
-    const resumeItem = savedItemFor(history, media);
-    const matchesEpisode = media.mediaType !== "tv" || (resumeItem?.season === media.season && resumeItem?.episode === media.episode);
-    const nextStartAt = matchesEpisode && Number(resumeItem?.progress?.watched) > 15 ? Number(resumeItem.progress.watched) : 0;
-    setResumeAt(nextStartAt);
-  }, [media.episode, media.id, media.mediaType, media.season]);
   useEffect(() => {
     const receive = ({ origin, data }) => {
       if (origin !== VIDUP_ORIGIN || !data) return;
@@ -671,6 +665,16 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             )}
           </div>
         </div>
+        <div className="movie-player-commandbar" aria-label="Playback shortcuts">
+          <div className="movie-player-commandbar__label"><span>Player shortcuts</span><small>Keyboard ready</small></div>
+          <div className="movie-player-commandbar__items">
+            <div className="movie-player-command"><Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /><span><strong>Play / pause</strong><small><kbd>Space</kbd></small></span></div>
+            <div className="movie-player-command"><Volume2 {...iconProps} /><span><strong>Mute / sound</strong><small><kbd>M</kbd></small></span></div>
+            <div className="movie-player-command"><span className="movie-player-command__pair"><Rewind size={13} /><FastForward size={13} /></span><span><strong>Skip 10 seconds</strong><small><kbd>←</kbd><kbd>→</kbd></small></span></div>
+            <div className="movie-player-command"><Captions {...iconProps} /><span><strong>Captions off</strong><small>CC in player</small></span></div>
+          </div>
+          <button type="button" className="movie-player-commandbar__fullscreen" onClick={toggleFullscreen} aria-label="Open player fullscreen" aria-keyshortcuts="f" title="Fullscreen (F)"><Maximize2 {...iconProps} /><span><strong>Fullscreen</strong><small>F or click</small></span></button>
+        </div>
         <section className="movie-player-about">
           <div className="movie-player-about__overview"><p>{details.detail || "Selected from the private catalog."}</p></div>
           <div className="movie-player-about__facts">
@@ -683,6 +687,21 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
             <dl>{details.director && <div><dt>Director</dt><dd>{details.director}</dd></div>}{details.cast?.length > 0 && <div><dt>Cast</dt><dd>{details.cast.slice(0, 4).join(", ")}</dd></div>}{details.genres?.length > 0 && <div><dt>Genres</dt><dd>{details.genres.slice(0, 4).join(", ")}</dd></div>}{details.year && <div><dt>Released</dt><dd>{details.year}</dd></div>}</dl>
           </div>
         </section>
+        {details.trailer?.id && (
+          <section className="movie-trailer">
+            <div className="movie-section-heading"><div><p>Official preview</p><h2>Watch the trailer</h2></div><span>YouTube</span></div>
+            <div className="movie-trailer__frame">
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(details.trailer.id)}?rel=0&modestbranding=1`}
+                title={`${details.title || media.title} trailer`}
+                loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </section>
+        )}
         {media.mediaType === "tv" && <EpisodeShelf media={media} details={details} onEpisode={selectedEpisode} />}
         <section className="movie-more"><div className="movie-section-heading"><div><p>Keep watching</p><h2>{media.mediaType === "tv" ? "More series" : "More films"}</h2></div></div><div className="movie-catalog-grid movie-catalog-grid--compact">{catalog.filter((item) => item.mediaType === media.mediaType && !sameMedia(item, media)).slice(0, 6).map((item, index) => <PosterCard key={item.id} media={item} index={index} progress={savedItemFor(history, item)?.progress} onSelect={onSelect} />)}</div></section>
       </main>
