@@ -539,20 +539,34 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const toggleFullscreen = useCallback(async () => {
     const frame = playerFrameRef.current;
     if (!frame) return;
-    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    const fullscreenElement = document.fullscreenElement
+      || document.webkitFullscreenElement
+      || document.mozFullScreenElement
+      || document.msFullscreenElement;
     if (fullscreenElement) {
-      if (document.exitFullscreen) await document.exitFullscreen();
-      else document.webkitExitFullscreen?.();
+      const exitFullscreen = document.exitFullscreen
+        || document.webkitExitFullscreen
+        || document.webkitCancelFullScreen
+        || document.mozCancelFullScreen
+        || document.msExitFullscreen;
+      if (exitFullscreen) await Promise.resolve(exitFullscreen.call(document));
+      return;
+    }
+    const requestFullscreen = frame.requestFullscreen
+      || frame.webkitRequestFullscreen
+      || frame.webkitRequestFullScreen
+      || frame.mozRequestFullScreen
+      || frame.msRequestFullscreen;
+    if (!requestFullscreen) {
+      frame.focus();
       return;
     }
     try {
-      if (frame.requestFullscreen) await frame.requestFullscreen({ navigationUI: "hide" });
-      else if (frame.webkitRequestFullscreen) frame.webkitRequestFullscreen();
-      else sendPlayerCommand("fullscreen");
+      await Promise.resolve(requestFullscreen.call(frame));
     } catch {
-      sendPlayerCommand("fullscreen");
+      frame.focus();
     }
-  }, [sendPlayerCommand]);
+  }, []);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
@@ -583,12 +597,19 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
   }, [details, media, onHistory, updatePlayerStatus]);
   useEffect(() => {
-    const syncFullscreen = () => setIsFullscreen((document.fullscreenElement || document.webkitFullscreenElement) === playerFrameRef.current);
+    const syncFullscreen = () => setIsFullscreen((document.fullscreenElement
+      || document.webkitFullscreenElement
+      || document.mozFullScreenElement
+      || document.msFullscreenElement) === playerFrameRef.current);
     document.addEventListener("fullscreenchange", syncFullscreen);
     document.addEventListener("webkitfullscreenchange", syncFullscreen);
+    document.addEventListener("mozfullscreenchange", syncFullscreen);
+    document.addEventListener("MSFullscreenChange", syncFullscreen);
     return () => {
       document.removeEventListener("fullscreenchange", syncFullscreen);
       document.removeEventListener("webkitfullscreenchange", syncFullscreen);
+      document.removeEventListener("mozfullscreenchange", syncFullscreen);
+      document.removeEventListener("MSFullscreenChange", syncFullscreen);
     };
   }, []);
   useEffect(() => {
