@@ -409,13 +409,13 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
                 name="movie-search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search films and series…"
+                placeholder="Search films & series…"
                 aria-label="Search movies, series, IMDb or TMDB"
                 autoComplete="off"
                 spellCheck="false"
               />
               {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} strokeWidth={1.4} absoluteStrokeWidth /></button>}
-              <button type="submit" disabled={!shown.length} aria-label="Open highlighted result"><ArrowRight {...iconProps} /></button>
+              <button type="submit" disabled={!shown.length} aria-label="Open highlighted result" className="movie-search-field__submit"><ArrowRight {...iconProps} /></button>
             </form>
             <div className="movie-search-scopes">
               {TYPES.map((option) => <button key={option.id} type="button" onClick={() => setType(option.id)} className={cn(type === option.id && "is-active")}>{option.label}</button>)}
