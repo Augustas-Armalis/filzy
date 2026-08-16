@@ -487,10 +487,10 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
   const playerUrl = useMemo(() => buildPlayerUrl(media, {
-    autoPlay: false,
+    autoPlay: true,
     chromecast: true,
     hideServer: false,
-    poster: true,
+    poster: false,
     theme: "FFFFFF",
   }), [media.episode, media.id, media.mediaType, media.season]);
 
@@ -566,7 +566,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
                 aria-keyshortcuts="Space ArrowLeft ArrowRight ArrowUp ArrowDown F M"
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
                 allowFullScreen
-                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
                 referrerPolicy="strict-origin-when-cross-origin"
                 onLoad={focusPlayer}
               />
