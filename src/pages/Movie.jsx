@@ -494,6 +494,7 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
   const [transport, setTransport] = useState({ autoPlay: true, captions: false, sequence: 0, startAt: 0 });
   const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isImmersive, setIsImmersive] = useState(false);
   const lastWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
@@ -535,12 +536,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     const captions = !transport.captions;
     remountPlayer({ autoPlay: playerStatusRef.current.playing, captions });
   }, [remountPlayer, transport.captions]);
-  const toggleMuted = useCallback(() => {
-    const muted = !playerStatusRef.current.muted;
-    sendPlayerCommand("mute", { muted, value: muted });
-    updatePlayerStatus({ muted });
-    window.setTimeout(() => sendPlayerCommand("getStatus"), 140);
-  }, [sendPlayerCommand, updatePlayerStatus]);
   const toggleFullscreen = useCallback(async () => {
     const frame = playerFrameRef.current;
     if (!frame) return;
@@ -557,21 +552,32 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       if (exitFullscreen) await Promise.resolve(exitFullscreen.call(document));
       return;
     }
+    if (isImmersive) {
+      setIsImmersive(false);
+      return;
+    }
     const requestFullscreen = frame.requestFullscreen
       || frame.webkitRequestFullscreen
       || frame.webkitRequestFullScreen
       || frame.mozRequestFullScreen
       || frame.msRequestFullscreen;
-    if (!requestFullscreen) {
-      frame.focus();
-      return;
+    if (requestFullscreen) {
+      try {
+        await Promise.resolve(requestFullscreen.call(frame, { navigationUI: "hide" }));
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        const activeElement = document.fullscreenElement
+          || document.webkitFullscreenElement
+          || document.mozFullScreenElement
+          || document.msFullscreenElement;
+        if (activeElement === frame) return;
+      } catch {
+        // iPhone Safari does not expose element fullscreen for cross-origin players.
+      }
     }
-    try {
-      await Promise.resolve(requestFullscreen.call(frame));
-    } catch {
-      frame.focus();
-    }
-  }, []);
+    sendPlayerCommand("fullscreen", { fullscreen: true, value: true });
+    setIsImmersive(true);
+    frame.focus();
+  }, [isImmersive, sendPlayerCommand]);
 
   useEffect(() => { const controller = new AbortController(); fetchMediaDetails(media, { signal: controller.signal }).then(setDetails).catch(() => {}); return () => controller.abort(); }, [media.id, media.mediaType]);
   useEffect(() => {
@@ -618,10 +624,15 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     };
   }, []);
   useEffect(() => {
+    document.documentElement.classList.toggle("movie-player-immersive-open", isImmersive);
+    return () => document.documentElement.classList.remove("movie-player-immersive-open");
+  }, [isImmersive]);
+  useEffect(() => {
     playerStatusRef.current = { currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 };
     setPlayerStatus(playerStatusRef.current);
     setTransport({ autoPlay: true, captions: false, sequence: 0, startAt: 0 });
     setIsFullscreen(false);
+    setIsImmersive(false);
   }, [media.episode, media.id, media.mediaType, media.season]);
   const forcePlayerFocus = useCallback(() => {
     window.requestAnimationFrame(() => playerShellRef.current?.focus({ preventScroll: true }));
@@ -645,16 +656,20 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         Space: togglePlayback,
         KeyF: toggleFullscreen,
         KeyC: toggleCaptions,
-        KeyM: toggleMuted,
       };
       const action = actions[event.code];
+      if (event.code === "Escape" && isImmersive) {
+        event.preventDefault();
+        setIsImmersive(false);
+        return;
+      }
       if (!action) return;
       event.preventDefault();
       action();
     };
     window.addEventListener("keydown", shortcut, true);
     return () => window.removeEventListener("keydown", shortcut, true);
-  }, [searchOpen, toggleCaptions, toggleFullscreen, toggleMuted, togglePlayback]);
+  }, [isImmersive, searchOpen, toggleCaptions, toggleFullscreen, togglePlayback]);
   const selectedEpisode = (episode) => onSelect({ ...media, ...details, season: episode.season || media.season || 1, episode: episode.episode || 1, progress: undefined });
 
   return (
@@ -671,20 +686,25 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
               <button type="button" onClick={togglePlayback} aria-label={playerStatus.playing ? "Pause video" : "Play video"} aria-pressed={playerStatus.playing} title={playerStatus.playing ? "Pause" : "Play"}>
                 {playerStatus.playing ? <Pause size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" /> : <Play size={15} fill="currentColor" strokeWidth={0} aria-hidden="true" />}
               </button>
-              <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} aria-pressed={isFullscreen} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-                {isFullscreen ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
+              <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen || isImmersive ? "Exit fullscreen" : "Enter fullscreen"} aria-pressed={isFullscreen || isImmersive} title={isFullscreen || isImmersive ? "Exit fullscreen" : "Fullscreen"}>
+                {isFullscreen || isImmersive ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
               </button>
             </div>
             <RatingMark rating={details.rating} detailed />
           </div>
         </div>
-        <div className="movie-player-stage">
+        <div className={cn("movie-player-stage", isImmersive && "is-immersive")}>
+          {isImmersive && (
+            <button type="button" className="movie-player-stage__exit" onClick={toggleFullscreen} aria-label="Exit fullscreen" title="Exit fullscreen">
+              <Minimize2 {...iconProps} />
+            </button>
+          )}
           <div
             ref={playerShellRef}
             className="movie-player-shell"
             onPointerEnter={focusPlayer}
             tabIndex={-1}
-            aria-keyshortcuts="Space F C M"
+            aria-keyshortcuts="Space F C"
           >
             <div className="movie-player-shell__screen">
               <iframe
@@ -696,13 +716,14 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
                 height="100%"
                 frameBorder="0"
                 tabIndex={0}
-                aria-keyshortcuts="Space ArrowLeft ArrowRight ArrowUp ArrowDown F M"
+                aria-keyshortcuts="Space ArrowLeft ArrowRight ArrowUp ArrowDown F C M"
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media; screen-wake-lock"
                 allowFullScreen
                 referrerPolicy="strict-origin-when-cross-origin"
                 onLoad={() => {
                   focusPlayer();
                   window.setTimeout(() => sendPlayerCommand("getStatus"), 350);
+                  window.setTimeout(() => sendPlayerCommand("getStatus"), 1100);
                 }}
               />
               <div className="movie-player-shell__reflection" aria-hidden="true" />

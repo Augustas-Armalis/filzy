@@ -1092,6 +1092,13 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
 .movie-player-titlebar__controls button[aria-pressed="true"] { border-color: rgba(255, 255, 255, 0.88); background: #fff; color: #050505 !important; }
 .movie-player-stage { position: relative; isolation: isolate; }
 .movie-player-stage::before { position: absolute; z-index: -1; inset: 3% 7% -8%; border-radius: 40%; pointer-events: none; content: ""; background: rgba(255, 255, 255, 0.1); filter: blur(70px); opacity: 0.5; }
+.movie-player-stage.is-immersive { position: fixed; z-index: 1200; inset: 0; display: grid; width: 100vw; height: 100dvh; place-items: center; background: #000; }
+.movie-player-stage.is-immersive::before { display: none; }
+.movie-player-stage.is-immersive .movie-player-shell { width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+.movie-player-stage.is-immersive .movie-player-shell__screen { width: 100%; height: 100%; aspect-ratio: auto; }
+.movie-player-stage__exit { position: fixed; z-index: 4; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 13px; background: rgba(0, 0, 0, 0.58); color: #fff !important; box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.34); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); touch-action: manipulation; }
+html.movie-player-immersive-open, html.movie-player-immersive-open body { overflow: hidden !important; overscroll-behavior: none; }
+html.movie-player-immersive-open .movie-player-main { z-index: 120; }
 .movie-player-shell { position: relative; overflow: clip; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 22px; background: #000; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 32px 110px rgba(0, 0, 0, 0.72); transform: translateZ(0); }
 .movie-player-shell:focus { outline: none; }
 .movie-player-shell__screen { position: relative; aspect-ratio: 16 / 9; }
