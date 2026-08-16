@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildPlayerUrl, fetchMediaDetails, formatRuntime, parseMediaInput } from "@/lib/movie";
+import { buildPlayerUrl, fetchMediaDetails, formatRuntime, parseMediaInput, searchMedia } from "@/lib/movie";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -28,6 +28,15 @@ describe("movie player helpers", () => {
   it("selects English captions by default when requested", () => {
     expect(buildPlayerUrl({ id: "tt1375666", mediaType: "movie" }, { sub: "en" }))
       .toContain("sub=en");
+  });
+
+  it("returns an exact curated search match immediately", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(searchMedia("Inception")).resolves.toEqual([
+      expect.objectContaining({ id: "tt1375666", mediaType: "movie", title: "Inception" }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("parses identifiers and complete player URLs", () => {

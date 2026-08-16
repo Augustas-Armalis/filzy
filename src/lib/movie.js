@@ -319,6 +319,12 @@ export async function searchMedia(query, { signal, mediaType = "all" } = {}) {
 
   const term = String(query || "").trim();
   if (term.length < 2) return [];
+  const normalizedTerm = term.toLocaleLowerCase("en");
+  const curatedExact = FEATURED_MEDIA.filter((item) => (
+    (mediaType === "all" || item.mediaType === mediaType)
+    && item.title.toLocaleLowerCase("en") === normalizedTerm
+  ));
+  if (curatedExact.length) return curatedExact;
 
   const types = mediaType === "movie" ? ["movie"] : mediaType === "tv" ? ["series"] : ["movie", "series"];
   const encoded = encodeURIComponent(term);

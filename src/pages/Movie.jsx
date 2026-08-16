@@ -182,7 +182,7 @@ function SecretHeader({ view, onView, onSearch, onHome, player = false }) {
             ))}
           </nav>
         )}
-        <button type="button" onClick={onSearch} className="movie-search-trigger" aria-label="Search">
+        <button type="button" onClick={onSearch} className="movie-search-trigger" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" title="Search (Command K)">
           <Search {...iconProps} />
           <span>Search</span>
           <kbd>⌘ K</kbd>
@@ -385,38 +385,43 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
   return (
     <AnimatePresence>
       {open && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="movie-search-overlay" data-lenis-prevent>
-          <button type="button" aria-label="Close search" onClick={onClose} className="movie-search-overlay__backdrop" />
-          <motion.div role="dialog" aria-modal="true" aria-label="Search the catalog" initial={{ opacity: 0, y: -22, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -14, scale: 0.99 }} transition={{ duration: 0.38, ease: [0.2, 0.8, 0.2, 1] }} className="movie-search-overlay__panel movie-glass">
-            <div className="movie-search-overlay__head"><p><span>Augustas Films</span> Find a title</p><button type="button" onClick={onClose} aria-label="Close search"><X {...iconProps} /></button></div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.32 }} className="movie-search-overlay" data-lenis-prevent>
+          <motion.button type="button" aria-label="Close search" onClick={onClose} className="movie-search-overlay__backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }} />
+          <motion.div role="dialog" aria-modal="true" aria-label="Search films and series" initial={{ opacity: 0, y: 34, filter: "blur(16px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: 20, filter: "blur(12px)" }} transition={{ duration: 0.52, ease: [0.16, 1, 0.3, 1] }} className="movie-search-overlay__panel">
+            <button type="button" onClick={onClose} aria-label="Close search" className="movie-search-overlay__close"><X {...iconProps} /></button>
             <form
               onSubmit={(event) => { event.preventDefault(); if (shown[highlightedIndex]) choose(shown[highlightedIndex]); }}
               onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  if (shown[highlightedIndex]) choose(shown[highlightedIndex]);
+                  return;
+                }
                 if (!shown.length || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
                 event.preventDefault();
                 setHighlighted((current) => event.key === "ArrowDown" ? (current + 1) % shown.length : (current - 1 + shown.length) % shown.length);
               }}
-              className="movie-search-field"
+              className={cn("movie-search-field", status === "loading" && "is-loading")}
             >
-              {status === "loading" ? <LoaderCircle {...iconProps} className="animate-spin" /> : <Search {...iconProps} />}
+              <span className="movie-search-field__icon" aria-hidden="true"><Search size={21} strokeWidth={1.25} absoluteStrokeWidth /></span>
               <input
                 ref={inputRef}
                 name="movie-search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search titles or paste an ID…"
+                placeholder="Search films and series…"
                 aria-label="Search movies, series, IMDb or TMDB"
                 autoComplete="off"
                 spellCheck="false"
               />
               {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} strokeWidth={1.4} absoluteStrokeWidth /></button>}
-              <button type="submit" disabled={!shown.length} aria-label="Open first result"><ArrowRight {...iconProps} /></button>
+              <button type="submit" disabled={!shown.length} aria-label="Open highlighted result"><ArrowRight {...iconProps} /></button>
             </form>
             <div className="movie-search-scopes">
               {TYPES.map((option) => <button key={option.id} type="button" onClick={() => setType(option.id)} className={cn(type === option.id && "is-active")}>{option.label}</button>)}
               <span><kbd>↑↓</kbd> Browse <kbd>↵</kbd> Open <kbd>Esc</kbd> Close</span>
             </div>
-            <div className="movie-search-overlay__label"><span>{query ? "Top results" : "Popular searches"}</span><small aria-live="polite">{status === "ready" ? `${results.length} matches` : "IMDb / TMDB IDs accepted"}</small></div>
+            <div className="movie-search-overlay__label"><span>{query ? "Top results" : "Popular searches"}</span><small aria-live="polite">{status === "loading" ? "Searching the library…" : status === "ready" ? `${results.length} matches` : "IMDb / TMDB IDs accepted"}</small></div>
             <div ref={resultsRef} className="movie-search-results">
               {status === "loading" && Array.from({ length: 6 }, (_, index) => (
                 <div key={index} className="movie-search-result movie-search-result--skeleton" aria-hidden="true">
@@ -425,11 +430,11 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
                 </div>
               ))}
               {shown.map((media, index) => (
-                <button key={`${media.mediaType}-${media.id}`} type="button" data-result-index={index} onMouseEnter={() => setHighlighted(index)} onFocus={() => setHighlighted(index)} onClick={() => choose(media)} className={cn("movie-search-result", index === highlightedIndex && "is-highlighted")}>
+                <motion.button key={`${media.mediaType}-${media.id}`} type="button" data-result-index={index} initial={{ opacity: 0, y: 10, filter: "blur(5px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.36, delay: Math.min(index * 0.025, 0.18), ease: [0.2, 0.8, 0.2, 1] }} onMouseEnter={() => setHighlighted(index)} onFocus={() => setHighlighted(index)} onClick={() => choose(media)} className={cn("movie-search-result", index === highlightedIndex && "is-highlighted")}>
                   <MediaImage media={media} priority={index < 4} />
                   <div><TypeMark type={media.mediaType} compact /><h3>{media.title}</h3><p>{[media.year, media.runtime, media.rating ? `IMDb ${media.rating}` : ""].filter(Boolean).join(" · ")}</p></div>
                   {sameMedia(active, media) ? <Check {...iconProps} /> : <ChevronRight {...iconProps} />}
-                </button>
+                </motion.button>
               ))}
               {status === "empty" && <div className="movie-search-empty"><Search size={24} strokeWidth={1} /><p>No matching title found.</p><span>Try the exact title or paste an IMDb / TMDB ID.</span></div>}
               {status === "error" && <div className="movie-search-empty"><p>Search is temporarily unavailable.</p><span>Direct IMDb and TMDB IDs still work.</span></div>}
@@ -753,6 +758,10 @@ function MovieExperience() {
   const sentinelRef = useRef(null);
   const footerRef = useRef(null);
   const [footerInView, setFooterInView] = useState(false);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    window.requestAnimationFrame(() => document.querySelector("input[name='movie-search']")?.focus({ preventScroll: true }));
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController(); setCatalogStatus("loading");
@@ -771,7 +780,16 @@ function MovieExperience() {
 
   useEffect(() => { const sentinel = sentinelRef.current; if (!sentinel) return undefined; const observer = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) loadMore(); }, { rootMargin: "500px 0px" }); observer.observe(sentinel); return () => observer.disconnect(); }, [loadMore]);
   useEffect(() => { const footer = footerRef.current; if (!footer) return undefined; const observer = new IntersectionObserver(([entry]) => setFooterInView(entry.isIntersecting), { threshold: 0.02 }); observer.observe(footer); return () => observer.disconnect(); }, [active]);
-  useEffect(() => { const shortcut = (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); } }; window.addEventListener("keydown", shortcut); return () => window.removeEventListener("keydown", shortcut); }, []);
+  useEffect(() => {
+    const shortcut = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || (event.code !== "KeyK" && event.key.toLowerCase() !== "k")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openSearch();
+    };
+    document.addEventListener("keydown", shortcut, true);
+    return () => document.removeEventListener("keydown", shortcut, true);
+  }, [openSearch]);
   useEffect(() => {
     lenis?.scrollTo(0, { immediate: true, force: true });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -798,10 +816,10 @@ function MovieExperience() {
       <ProgressiveEdgeBlur edge="bottom" hidden={!active && footerInView} />
       <AnimatePresence mode="wait">
         {active ? (
-          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={() => setActive(null)} onSearch={() => setSearchOpen(true)} onHistory={setHistory} />
+          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={() => setActive(null)} onSearch={openSearch} onHistory={setHistory} />
         ) : (
           <motion.div key="catalog" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <SecretHeader view={view} onView={changeView} onSearch={() => setSearchOpen(true)} onHome={goHome} />
+            <SecretHeader view={view} onView={changeView} onSearch={openSearch} onHome={goHome} />
             <Hero items={heroItems} index={Math.min(heroIndex, Math.max(0, heroItems.slice(0, 6).length - 1))} onIndex={setHeroIndex} onSelect={select} onExplore={() => lenis?.scrollTo("#catalog", { offset: -90, duration: 1.2 })} />
             <main id="catalog" className="movie-catalog">
               <div className="movie-section-heading movie-catalog__heading"><div><p>Curated live</p><h2>{view === "movie" ? "Popular films" : view === "tv" ? "Popular series" : "Now showing"}</h2></div><div className="movie-catalog__count"><span>{visibleCatalog.length} titles</span><i /></div></div>
