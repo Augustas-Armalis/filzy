@@ -1080,9 +1080,23 @@ html:has(.movie-page)::-webkit-scrollbar-corner { background: #000; }
 .movie-player-page__backdrop::after { position: absolute; inset: 0; content: ""; background: radial-gradient(circle at 50% 28%, transparent 0, rgba(0, 0, 0, 0.18) 36%, rgba(0, 0, 0, 0.8) 79%), linear-gradient(to bottom, rgba(0, 0, 0, 0.28), #000 72%); }
 .movie-player-page__backdrop .movie-image img { transform: scale(1.16); filter: blur(42px) saturate(1.65) contrast(1.04) brightness(0.58); }
 .movie-player-main { z-index: 2; padding: 104px var(--movie-gutter) 100px; }
-.movie-player-titlebar { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: end; gap: 14px; margin-bottom: 20px; }
-.movie-round-button { display: grid; width: 42px; height: 42px; place-items: center; align-self: center; border: 1px solid var(--movie-hairline); border-radius: 50%; background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.66) !important; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
-.movie-player-titlebar h1 { margin-top: 4px; font-size: clamp(29px, 4vw, 52px); line-height: 0.94; letter-spacing: -0.045em; }
+.movie-player-titlebar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 24px; margin-bottom: 20px; }
+.movie-player-titlebar__lead { display: flex; min-width: 0; align-items: center; gap: 16px; }
+.movie-player-back { position: relative; display: flex; height: 42px; flex: 0 0 auto; align-items: center; gap: 8px; overflow: hidden; padding: 0 14px 0 9px; border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 14px; background: rgba(5, 5, 5, 0.52); color: rgba(255, 255, 255, 0.66) !important; box-shadow: inset 0 1px rgba(255, 255, 255, 0.065), 0 12px 34px rgba(0, 0, 0, 0.24); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+.movie-player-back::after { position: absolute; inset: 0; pointer-events: none; content: ""; background: linear-gradient(110deg, transparent 18%, rgba(255, 255, 255, 0.08) 50%, transparent 82%); opacity: 0; transform: translateX(-70%); transition: opacity 180ms ease, transform 460ms cubic-bezier(0.16, 1, 0.3, 1); }
+.movie-player-back i { position: relative; z-index: 1; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 8px; background: rgba(255, 255, 255, 0.065); transition: background 180ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+.movie-player-back > span { position: relative; z-index: 1; font-size: 10px; font-weight: 540; letter-spacing: 0.01em; }
+.movie-player-back:hover { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.085); color: #fff !important; transform: translateX(-2px); }
+.movie-player-back:hover::after { opacity: 1; transform: translateX(70%); }
+.movie-player-back:hover i { background: rgba(255, 255, 255, 0.11); transform: translateX(-1px); }
+.movie-player-back:active { transform: translateX(-1px) scale(0.97); }
+.movie-player-titlebar__identity { min-width: 0; }
+.movie-player-titlebar__eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.movie-player-titlebar__eyebrow::after { width: 26px; height: 1px; background: linear-gradient(to right, rgba(255, 255, 255, 0.28), transparent); content: ""; }
+.movie-player-titlebar__eyebrow > span { color: rgba(255, 255, 255, 0.29); font-size: 8px; font-variant-numeric: tabular-nums; letter-spacing: 0.11em; }
+.movie-player-titlebar__eyebrow .movie-type-mark { color: rgba(255, 255, 255, 0.72); font-size: 9px; letter-spacing: 0.13em; }
+.movie-player-titlebar__eyebrow .movie-type-mark svg { width: 10px; height: 10px; }
+.movie-player-titlebar h1 { overflow: hidden; margin: 0; font-size: clamp(31px, 3.4vw, 48px); line-height: 0.92; letter-spacing: -0.045em; text-overflow: ellipsis; white-space: nowrap; }
 .movie-player-titlebar__actions { display: flex; align-items: center; gap: 8px; padding-bottom: 1px; color: rgba(255, 255, 255, 0.4); font-size: 10px; }
 .movie-player-titlebar__actions > span:not(.movie-rating-mark) { margin-right: 4px; }
 .movie-player-titlebar__controls { display: flex; align-items: center; gap: 4px; }
@@ -1228,8 +1242,15 @@ html.movie-player-immersive-open .movie-player-main { z-index: 120; }
   .movie-search-result__skeleton-art { width: 52px; height: 72px; border-radius: 9px; }
   .movie-search-result h3 { font-size: 19px; }
   .movie-player-main { padding: max(104px, calc(env(safe-area-inset-top) + 90px)) var(--movie-gutter) 70px; }
-  .movie-player-titlebar { grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 6px; margin: 12px 0 16px; }
-  .movie-player-titlebar > .movie-round-button { width: 40px; height: 40px; }
+  .movie-player-titlebar { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; margin: 12px 0 16px; }
+  .movie-player-titlebar__lead { gap: 8px; }
+  .movie-player-back { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 12px; }
+  .movie-player-back i { width: 24px; height: 24px; }
+  .movie-player-back > span { display: none; }
+  .movie-player-titlebar__eyebrow { gap: 6px; margin-bottom: 5px; }
+  .movie-player-titlebar__eyebrow::after { display: none; }
+  .movie-player-titlebar__eyebrow > span { font-size: 7px; }
+  .movie-player-titlebar__eyebrow .movie-type-mark { gap: 4px; font-size: 8px; }
   .movie-player-titlebar__actions { display: flex; width: auto; grid-column: auto; justify-content: flex-end; gap: 4px; padding: 0; }
   .movie-player-titlebar__actions > span:not(.movie-rating-mark) { display: none; }
   .movie-player-titlebar__controls { gap: 3px; }
@@ -1238,7 +1259,7 @@ html.movie-player-immersive-open .movie-player-main { z-index: 120; }
   .movie-rating-mark--detailed > svg { width: 10px; height: 10px; }
   .movie-rating-mark--detailed .movie-rating-mark__score { font-size: 18px; }
   .movie-rating-mark--detailed .movie-rating-mark__source { display: none; }
-  .movie-player-titlebar h1 { overflow: hidden; font-size: clamp(24px, 7.5vw, 32px); text-overflow: ellipsis; white-space: nowrap; }
+  .movie-player-titlebar h1 { font-size: clamp(24px, 7.5vw, 32px); }
   .movie-player-shell { border-radius: 18px; }
   .movie-player-shell__screen { min-height: 0; }
   .movie-player-about { gap: 26px; padding: 38px 8px 50px; }

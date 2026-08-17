@@ -461,14 +461,14 @@ function EpisodeShelf({ media, details, onEpisode }) {
     <section className="movie-episodes">
       <div className="movie-section-heading">
         <div><p>Episode guide</p><h2>Season {String(season).padStart(2, "0")}</h2></div>
-        <div className="movie-season-nav">
+        <div className="movie-season-nav" data-lenis-prevent-horizontal>
           {allSeasons.length ? allSeasons.map((number) => <button key={number} type="button" onClick={() => setSeason(number)} className={cn(number === season && "is-active")}>{String(number).padStart(2, "0")}</button>) : (
             <><button type="button" aria-label="Previous season" onClick={() => setSeason(Math.max(1, season - 1))}><ChevronLeft {...iconProps} /></button><span>Season {season}</span><button type="button" aria-label="Next season" onClick={() => setSeason(season + 1)}><ChevronRight {...iconProps} /></button></>
           )}
         </div>
       </div>
       {episodes.length ? (
-        <div className="movie-episode-rail" data-lenis-prevent>
+        <div className="movie-episode-rail" data-lenis-prevent-horizontal>
           {episodes.map((episode) => {
             const selected = episode.episode === (media.episode || 1) && episode.season === (media.season || 1);
             return (
@@ -680,8 +680,18 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
       <SecretHeader player view="all" onHome={onClose} onSearch={onSearch} />
       <main className="movie-player-main">
         <div className="movie-player-titlebar">
-          <button type="button" onClick={onClose} className="movie-round-button" aria-label="Back to catalog"><ArrowLeft {...iconProps} /></button>
-          <div><TypeMark type={media.mediaType} /><h1>{details.title || media.title}</h1></div>
+          <div className="movie-player-titlebar__lead">
+            <button type="button" onClick={onClose} className="movie-player-back" aria-label="Back to catalog">
+              <i><ArrowLeft {...iconProps} /></i><span>Browse</span>
+            </button>
+            <div className="movie-player-titlebar__identity">
+              <div className="movie-player-titlebar__eyebrow">
+                <TypeMark type={media.mediaType} />
+                {media.mediaType === "tv" && <span>S{String(media.season || 1).padStart(2, "0")} · E{String(media.episode || 1).padStart(2, "0")}</span>}
+              </div>
+              <h1>{details.title || media.title}</h1>
+            </div>
+          </div>
           <div className="movie-player-titlebar__actions">
             {[details.year, details.runtime].filter(Boolean).map((item) => <span key={item}>{item}</span>)}
             <div className="movie-player-titlebar__controls" aria-label="Playback controls">
