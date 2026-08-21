@@ -14,6 +14,7 @@ const Extract = lazy(() => importWithRefresh(() => import("@/pages/Extract")));
 const Blog = lazy(() => importWithRefresh(() => import("@/pages/Blog")));
 const Guide = lazy(() => importWithRefresh(() => import("@/pages/Guide")));
 const Movie = lazy(() => importWithRefresh(() => import("@/pages/Movie")));
+const MovieAdmin = lazy(() => importWithRefresh(() => import("@/pages/MovieAdmin")));
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -37,6 +38,7 @@ function AnimatedRoutes() {
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<Guide />} />
             <Route path="/movie" element={<Movie />} />
+            <Route path="/movie/admin" element={<MovieAdmin />} />
             <Route path="/not-found" element={<NotFound />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

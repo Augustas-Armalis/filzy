@@ -19,7 +19,7 @@ export function Shell({ children }) {
   const [photo, setPhoto] = useState(null);
   const location = useLocation();
   const [backgroundKey, setBackgroundKey] = useState(location.pathname);
-  const movieMode = /^\/movie\/?$/.test(location.pathname);
+  const movieMode = /^\/movie(?:\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (backgroundKey === location.pathname) return undefined;

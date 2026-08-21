@@ -26,6 +26,32 @@ form, or local helper. Filzy's Durable Object stores only short-link metadata:
 note, expiry, filenames, sizes, and temporary download identifiers. It never
 stores file bytes.
 
+## AFilm analytics
+
+`/movie` offers an explicit analytics choice. When a visitor allows it, AFilm
+records session timing and presence, page/referrer, browser and device details,
+search selections, playback events, and the current movie or episode. The
+signaling Worker adds the connecting IP address and Cloudflare's approximate
+country/region/city metadata; the browser is never trusted to supply those
+fields. Raw sessions and events are deleted after 30 days.
+
+The private dashboard is at `/movie/admin`. Its read endpoint requires the
+`AFILM_ADMIN_TOKEN` Worker secret, and the dashboard keeps the entered token in
+`sessionStorage` only. Never place this token in Vite environment variables or
+commit it to the repository.
+
+Before deploying the analytics Worker migration, set a strong random secret:
+
+```bash
+cd workers/signaling
+npx wrangler secret put AFILM_ADMIN_TOKEN
+npx wrangler deploy
+```
+
+The production frontend uses the existing signaling Worker URL. Local
+end-to-end development can point at a local Worker with
+`VITE_AFILM_ANALYTICS_API=http://127.0.0.1:8787`.
+
 ## Routing and SEO
 
 Filzy uses `BrowserRouter` and clean paths. The Vite build creates a real HTML entry point for every indexable landing page and guide, plus route-specific metadata, structured data, visible prerendered copy, a sitemap, an RSS feed, and a noindex 404 page.

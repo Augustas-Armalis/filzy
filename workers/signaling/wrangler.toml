@@ -12,9 +12,17 @@ compatibility_date = "2025-01-01"
 name = "BEAM_ROOMS"
 class_name = "BeamRoom"
 
+[[durable_objects.bindings]]
+name = "AFILM_ANALYTICS"
+class_name = "AFilmAnalytics"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BeamRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AFilmAnalytics"]
 
 # --- TURN (optional, lights up cross-network / strict-NAT beams) -------------
 # The /turn endpoint stays dormant (returns no relay) until these two secrets

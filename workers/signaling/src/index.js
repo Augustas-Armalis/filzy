@@ -20,6 +20,10 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname.startsWith("/afilm/analytics/")) {
+      if (request.method === "OPTIONS") return analyticsCors(request, new Response(null, { status: 204 }));
+      return analyticsCors(request, await analyticsGateway(request, url, env));
+    }
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
     if (url.pathname === "/" || url.pathname === "/health") {
       return cors(json({ ok: true, service: "filzy-signaling" }));
@@ -84,6 +88,80 @@ function cors(res) {
     headers,
     webSocket: res.webSocket,
   });
+}
+
+const AFILM_ALLOWED_ORIGINS = new Set([
+  "https://filzy.site",
+  "https://www.filzy.site",
+  "http://localhost:4177",
+  "http://127.0.0.1:4177",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+function analyticsCors(request, response) {
+  const headers = new Headers(response.headers);
+  const origin = request.headers.get("origin") || "";
+  if (AFILM_ALLOWED_ORIGINS.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("Vary", "Origin");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+async function analyticsGateway(request, url, env) {
+  const origin = request.headers.get("origin") || "";
+  const collecting = url.pathname === "/afilm/analytics/collect";
+  if ((collecting && !AFILM_ALLOWED_ORIGINS.has(origin)) || (origin && !AFILM_ALLOWED_ORIGINS.has(origin))) return poolJson({ error: "Origin not allowed." }, 403);
+  if (!env.AFILM_ANALYTICS) return poolJson({ error: "Analytics storage is not configured." }, 503);
+
+  if (url.pathname === "/afilm/analytics/collect" && request.method !== "POST") return poolJson({ error: "Method not allowed." }, 405);
+  const adminRoute = url.pathname === "/afilm/analytics/summary" || /^\/afilm\/analytics\/session\/[A-Za-z0-9_-]+$/.test(url.pathname);
+  if (adminRoute) {
+    if (request.method !== "GET") return poolJson({ error: "Method not allowed." }, 405);
+    if (!env.AFILM_ADMIN_TOKEN) return poolJson({ error: "Analytics admin access is not configured." }, 503);
+    const supplied = String(request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!await secureSecretEqual(supplied, env.AFILM_ADMIN_TOKEN)) return poolJson({ error: "Unauthorized." }, 401);
+  } else if (url.pathname !== "/afilm/analytics/collect") {
+    return poolJson({ error: "Not found." }, 404);
+  }
+
+  const headers = new Headers(request.headers);
+  const cf = request.cf || {};
+  headers.set("x-afilm-ip", cleanAnalyticsText(request.headers.get("cf-connecting-ip"), 80));
+  headers.set("x-afilm-country", cleanAnalyticsText(cf.country, 8));
+  headers.set("x-afilm-region", cleanAnalyticsText(cf.region, 120));
+  headers.set("x-afilm-city", cleanAnalyticsText(cf.city, 120));
+  headers.set("x-afilm-timezone", cleanAnalyticsText(cf.timezone, 80));
+  headers.set("x-afilm-colo", cleanAnalyticsText(cf.colo, 12));
+  headers.set("x-afilm-continent", cleanAnalyticsText(cf.continent, 8));
+  headers.set("x-afilm-region-code", cleanAnalyticsText(cf.regionCode, 12));
+  headers.set("x-afilm-postal-code", cleanAnalyticsText(cf.postalCode, 32));
+  headers.set("x-afilm-metro-code", cleanAnalyticsText(cf.metroCode, 16));
+  headers.set("x-afilm-latitude", cleanAnalyticsText(cf.latitude, 32));
+  headers.set("x-afilm-longitude", cleanAnalyticsText(cf.longitude, 32));
+  headers.set("x-afilm-asn", cleanAnalyticsText(cf.asn, 20));
+  headers.set("x-afilm-as-organization", cleanAnalyticsText(cf.asOrganization, 180));
+  headers.set("x-afilm-http-protocol", cleanAnalyticsText(cf.httpProtocol, 24));
+  headers.set("x-afilm-tls-version", cleanAnalyticsText(cf.tlsVersion, 24));
+  headers.set("x-afilm-tcp-rtt", cleanAnalyticsText(cf.clientTcpRtt, 20));
+  headers.set("x-afilm-quic-rtt", cleanAnalyticsText(cf.clientQuicRtt, 20));
+  headers.set("x-afilm-is-eu", cf.isEUCountry === "1" ? "1" : "0");
+  headers.set("x-afilm-admin-ok", adminRoute ? "1" : "0");
+  const forwarded = new Request(request, { headers });
+  const id = env.AFILM_ANALYTICS.idFromName("afilm-global");
+  return env.AFILM_ANALYTICS.get(id).fetch(forwarded);
+}
+
+async function secureSecretEqual(left, right) {
+  if (!left || !right) return false;
+  const [leftHash, rightHash] = await Promise.all([hashSecret(left), hashSecret(right)]);
+  let different = leftHash.length ^ rightHash.length;
+  for (let index = 0; index < Math.max(leftHash.length, rightHash.length); index += 1) {
+    different |= (leftHash.charCodeAt(index) || 0) ^ (rightHash.charCodeAt(index) || 0);
+  }
+  return different === 0;
 }
 
 /** One room per Beam. Relays signaling between peers using hibernatable
@@ -319,6 +397,419 @@ export class BeamRoom {
       }
     }
   }
+}
+
+const AFILM_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const AFILM_ONLINE_WINDOW_MS = 45_000;
+
+/** One SQLite-backed Durable Object stores AFilm's consented audience events.
+ * Raw sessions and events are automatically removed after 30 days. */
+export class AFilmAnalytics {
+  constructor(ctx, env) {
+    this.ctx = ctx;
+    this.env = env;
+    this.sql = ctx.storage.sql;
+    this.ctx.blockConcurrencyWhile(async () => {
+      this.sql.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          session_id TEXT PRIMARY KEY,
+          visitor_id TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          last_seen INTEGER NOT NULL,
+          ended_at INTEGER,
+          active_seconds REAL NOT NULL DEFAULT 0,
+          path TEXT NOT NULL DEFAULT '',
+          referrer TEXT NOT NULL DEFAULT '',
+          language TEXT NOT NULL DEFAULT '',
+          timezone TEXT NOT NULL DEFAULT '',
+          viewport TEXT NOT NULL DEFAULT '',
+          user_agent TEXT NOT NULL DEFAULT '',
+          browser TEXT NOT NULL DEFAULT '',
+          device TEXT NOT NULL DEFAULT '',
+          ip TEXT NOT NULL DEFAULT '',
+          country TEXT NOT NULL DEFAULT '',
+          region TEXT NOT NULL DEFAULT '',
+          city TEXT NOT NULL DEFAULT '',
+          colo TEXT NOT NULL DEFAULT '',
+          continent TEXT NOT NULL DEFAULT '',
+          region_code TEXT NOT NULL DEFAULT '',
+          postal_code TEXT NOT NULL DEFAULT '',
+          metro_code TEXT NOT NULL DEFAULT '',
+          latitude REAL,
+          longitude REAL,
+          asn INTEGER,
+          as_organization TEXT NOT NULL DEFAULT '',
+          http_protocol TEXT NOT NULL DEFAULT '',
+          tls_version TEXT NOT NULL DEFAULT '',
+          client_tcp_rtt REAL,
+          client_quic_rtt REAL,
+          is_eu_country INTEGER NOT NULL DEFAULT 0,
+          current_media_id TEXT NOT NULL DEFAULT '',
+          current_type TEXT NOT NULL DEFAULT '',
+          current_title TEXT NOT NULL DEFAULT '',
+          current_season INTEGER,
+          current_episode INTEGER,
+          current_time REAL NOT NULL DEFAULT 0,
+          duration REAL NOT NULL DEFAULT 0,
+          playing INTEGER NOT NULL DEFAULT 0,
+          visible INTEGER NOT NULL DEFAULT 0,
+          focused INTEGER NOT NULL DEFAULT 0,
+          event_count INTEGER NOT NULL DEFAULT 0,
+          search_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS sessions_last_seen_idx ON sessions(last_seen DESC);
+        CREATE INDEX IF NOT EXISTS sessions_started_at_idx ON sessions(started_at DESC);
+        CREATE INDEX IF NOT EXISTS sessions_visitor_idx ON sessions(visitor_id, started_at DESC);
+        CREATE TABLE IF NOT EXISTS events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          media_id TEXT NOT NULL DEFAULT '',
+          media_type TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          season INTEGER,
+          episode INTEGER,
+          data_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS events_session_idx ON events(session_id, occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS events_type_time_idx ON events(event_type, occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS events_media_idx ON events(media_type, media_id, occurred_at DESC);
+      `);
+      const additionalColumns = [
+        ["continent", "TEXT NOT NULL DEFAULT ''"],
+        ["region_code", "TEXT NOT NULL DEFAULT ''"],
+        ["postal_code", "TEXT NOT NULL DEFAULT ''"],
+        ["metro_code", "TEXT NOT NULL DEFAULT ''"],
+        ["latitude", "REAL"],
+        ["longitude", "REAL"],
+        ["asn", "INTEGER"],
+        ["as_organization", "TEXT NOT NULL DEFAULT ''"],
+        ["http_protocol", "TEXT NOT NULL DEFAULT ''"],
+        ["tls_version", "TEXT NOT NULL DEFAULT ''"],
+        ["client_tcp_rtt", "REAL"],
+        ["client_quic_rtt", "REAL"],
+        ["is_eu_country", "INTEGER NOT NULL DEFAULT 0"],
+      ];
+      for (const [column, definition] of additionalColumns) {
+        try { this.sql.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${definition}`); } catch { /* column already exists */ }
+      }
+      if (await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(Date.now() + 6 * 60 * 60 * 1000);
+    });
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/collect") && request.method === "POST") return this.collect(request);
+    if (url.pathname.endsWith("/summary") && request.method === "GET" && request.headers.get("x-afilm-admin-ok") === "1") return this.summary();
+    const sessionMatch = url.pathname.match(/\/session\/([A-Za-z0-9_-]+)$/);
+    if (sessionMatch && request.method === "GET" && request.headers.get("x-afilm-admin-ok") === "1") return this.sessionDetail(sessionMatch[1]);
+    return poolJson({ error: "Not found." }, 404);
+  }
+
+  async collect(request) {
+    const body = await readAnalyticsBody(request);
+    if (!body) return poolJson({ error: "Invalid analytics payload." }, 400);
+    const sessionId = cleanAnalyticsId(body.sessionId, "s_");
+    const visitorId = cleanAnalyticsId(body.visitorId, "v_");
+    const eventType = cleanAnalyticsEvent(body.eventType);
+    if (!sessionId || !visitorId || !eventType) return poolJson({ error: "Invalid analytics identifiers." }, 400);
+
+    const now = Date.now();
+    const reportedTime = Number(body.occurredAt);
+    const occurredAt = Number.isFinite(reportedTime) && Math.abs(reportedTime - now) < 24 * 60 * 60 * 1000 ? Math.round(reportedTime) : now;
+    const client = body.client && typeof body.client === "object" ? body.client : {};
+    const eventData = body.data && typeof body.data === "object" && !Array.isArray(body.data) ? body.data : {};
+    const media = cleanAnalyticsMedia(body.media);
+    const userAgent = cleanAnalyticsText(client.userAgent, 500);
+    const agent = analyticsAgent(userAgent);
+    const activeIncrement = eventType === "heartbeat" ? cleanAnalyticsNumber(eventData.activeSeconds, 0, 30) : 0;
+    const hasCurrentTime = Object.prototype.hasOwnProperty.call(eventData, "currentTime");
+    const hasDuration = Object.prototype.hasOwnProperty.call(eventData, "duration");
+    const hasPlaying = typeof eventData.playing === "boolean";
+    const currentTime = cleanAnalyticsNumber(eventData.currentTime, 0, 24 * 60 * 60);
+    const duration = cleanAnalyticsNumber(eventData.duration, 0, 24 * 60 * 60);
+    const playing = hasPlaying ? eventData.playing : eventType === "player_play";
+    const endedAt = eventType === "session_end" ? occurredAt : null;
+    const searchIncrement = eventType === "search_result_open" ? 1 : 0;
+
+    this.sql.exec(
+      "INSERT OR IGNORE INTO sessions (session_id, visitor_id, started_at, last_seen) VALUES (?, ?, ?, ?)",
+      sessionId, visitorId, occurredAt, occurredAt,
+    );
+    this.sql.exec(`
+      UPDATE sessions SET
+        visitor_id = ?, last_seen = ?, ended_at = ?, active_seconds = active_seconds + ?,
+        path = ?, referrer = CASE WHEN referrer = '' THEN ? ELSE referrer END,
+        language = ?, timezone = ?, viewport = ?, user_agent = ?, browser = ?, device = ?,
+        ip = ?, country = ?, region = ?, city = ?, colo = ?,
+        continent = ?, region_code = ?, postal_code = ?, metro_code = ?, latitude = ?, longitude = ?,
+        asn = ?, as_organization = ?, http_protocol = ?, tls_version = ?, client_tcp_rtt = ?, client_quic_rtt = ?, is_eu_country = ?,
+        current_media_id = ?, current_type = ?, current_title = ?, current_season = ?, current_episode = ?,
+        current_time = CASE WHEN ? = 1 THEN ? ELSE current_time END,
+        duration = CASE WHEN ? = 1 THEN ? ELSE duration END,
+        playing = CASE WHEN ? = 1 THEN ? ELSE playing END,
+        visible = ?, focused = ?,
+        event_count = event_count + 1, search_count = search_count + ?
+      WHERE session_id = ?
+    `,
+    visitorId, occurredAt, endedAt, activeIncrement,
+    cleanAnalyticsText(client.path, 600), cleanAnalyticsText(client.referrer, 600),
+    cleanAnalyticsText(client.language, 40), cleanAnalyticsText(client.timezone || request.headers.get("x-afilm-timezone"), 80), cleanAnalyticsText(client.viewport, 40), userAgent, agent.browser, agent.device,
+    cleanAnalyticsText(request.headers.get("x-afilm-ip"), 80), cleanAnalyticsText(request.headers.get("x-afilm-country"), 8), cleanAnalyticsText(request.headers.get("x-afilm-region"), 120), cleanAnalyticsText(request.headers.get("x-afilm-city"), 120), cleanAnalyticsText(request.headers.get("x-afilm-colo"), 12),
+    cleanAnalyticsText(request.headers.get("x-afilm-continent"), 8), cleanAnalyticsText(request.headers.get("x-afilm-region-code"), 12), cleanAnalyticsText(request.headers.get("x-afilm-postal-code"), 32), cleanAnalyticsText(request.headers.get("x-afilm-metro-code"), 16), cleanAnalyticsCoordinate(request.headers.get("x-afilm-latitude"), -90, 90), cleanAnalyticsCoordinate(request.headers.get("x-afilm-longitude"), -180, 180),
+    cleanAnalyticsInteger(request.headers.get("x-afilm-asn"), 0, 4_294_967_295), cleanAnalyticsText(request.headers.get("x-afilm-as-organization"), 180), cleanAnalyticsText(request.headers.get("x-afilm-http-protocol"), 24), cleanAnalyticsText(request.headers.get("x-afilm-tls-version"), 24), cleanAnalyticsCoordinate(request.headers.get("x-afilm-tcp-rtt"), 0, 120_000), cleanAnalyticsCoordinate(request.headers.get("x-afilm-quic-rtt"), 0, 120_000), request.headers.get("x-afilm-is-eu") === "1" ? 1 : 0,
+    media.mediaId, media.mediaType, media.title, media.season, media.episode,
+    hasCurrentTime ? 1 : 0, currentTime, hasDuration ? 1 : 0, duration, hasPlaying || eventType === "player_play" ? 1 : 0, playing ? 1 : 0, body.visible ? 1 : 0, body.focused ? 1 : 0,
+    searchIncrement, sessionId);
+
+    if (shouldStoreAnalyticsEvent(eventType)) {
+      this.sql.exec(`
+        INSERT INTO events (session_id, event_type, occurred_at, media_id, media_type, title, season, episode, data_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, sessionId, eventType, occurredAt, media.mediaId, media.mediaType, media.title, media.season, media.episode, cleanAnalyticsData(eventData));
+    }
+    return poolJson({ ok: true }, 202);
+  }
+
+  summary() {
+    const now = Date.now();
+    const onlineSince = now - AFILM_ONLINE_WINDOW_MS;
+    const today = new Date(now);
+    const dayStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const retentionStart = now - AFILM_RETENTION_MS;
+    const overview = firstAnalyticsRow(this.sql.exec(`
+      SELECT
+        (SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL AND last_seen >= ?) AS onlineNow,
+        (SELECT COUNT(*) FROM sessions WHERE started_at >= ?) AS sessionsToday,
+        (SELECT COUNT(DISTINCT visitor_id) FROM sessions WHERE started_at >= ?) AS visitorsToday,
+        (SELECT COALESCE(AVG(active_seconds), 0) FROM sessions WHERE started_at >= ?) AS avgActiveSeconds,
+        (SELECT COUNT(*) FROM events WHERE event_type = 'media_open' AND occurred_at >= ?) AS watchStarts,
+        (SELECT COUNT(*) FROM events WHERE event_type = 'player_ended' AND occurred_at >= ?) AS completions,
+        (SELECT COUNT(*) FROM events WHERE occurred_at >= ?) AS events30Days,
+        (SELECT COUNT(*) FROM events WHERE event_type = 'search_result_open' AND occurred_at >= ?) AS searches30Days,
+        (SELECT COUNT(DISTINCT country) FROM sessions WHERE started_at >= ? AND country != '') AS countries30Days,
+        (SELECT COUNT(*) FROM (SELECT visitor_id FROM sessions WHERE started_at >= ? GROUP BY visitor_id HAVING COUNT(*) > 1)) AS returningVisitors,
+        (SELECT COALESCE(AVG((current_time / duration) * 100), 0) FROM sessions WHERE started_at >= ? AND duration > 0) AS avgCompletionPercent
+    `, onlineSince, dayStart, dayStart, dayStart, dayStart, dayStart, retentionStart, retentionStart, retentionStart, retentionStart, retentionStart)) || {};
+
+    const online = analyticsRows(this.sql.exec(`${analyticsSessionSelect()} WHERE ended_at IS NULL AND last_seen >= ? ORDER BY last_seen DESC LIMIT 100`, onlineSince));
+    const recent = analyticsRows(this.sql.exec(`${analyticsSessionSelect()} ORDER BY started_at DESC LIMIT 100`));
+    const topTitles = analyticsRows(this.sql.exec(`
+      SELECT media_id AS mediaId, media_type AS mediaType, title,
+        SUM(CASE WHEN event_type = 'media_open' THEN 1 ELSE 0 END) AS starts,
+        SUM(CASE WHEN event_type = 'player_ended' THEN 1 ELSE 0 END) AS completions
+      FROM events
+      WHERE occurred_at >= ? AND media_id != '' AND event_type IN ('media_open', 'player_ended')
+      GROUP BY media_type, media_id, title
+      ORDER BY starts DESC, completions DESC, title ASC
+      LIMIT 20
+    `, retentionStart));
+    const searches = analyticsRows(this.sql.exec(`
+      SELECT occurred_at AS occurredAt, data_json AS dataJson
+      FROM events WHERE event_type = 'search_result_open'
+      ORDER BY occurred_at DESC LIMIT 50
+    `)).map((row) => {
+      let data = {};
+      try { data = JSON.parse(row.dataJson || "{}"); } catch { data = {}; }
+      return { occurredAt: row.occurredAt, query: cleanAnalyticsText(data.query, 180), resultTitle: cleanAnalyticsText(data.resultTitle, 180) };
+    });
+    const locations = analyticsRows(this.sql.exec(`
+      SELECT country, region, city, latitude, longitude,
+        COUNT(*) AS sessions, COUNT(DISTINCT visitor_id) AS visitors,
+        MAX(last_seen) AS lastSeen
+      FROM sessions WHERE started_at >= ? AND country != ''
+      GROUP BY country, region, city, latitude, longitude
+      ORDER BY sessions DESC, lastSeen DESC LIMIT 30
+    `, retentionStart));
+    const referrers = analyticsRows(this.sql.exec(`
+      SELECT CASE WHEN referrer = '' THEN 'Direct' ELSE referrer END AS referrer,
+        COUNT(*) AS sessions, COUNT(DISTINCT visitor_id) AS visitors
+      FROM sessions WHERE started_at >= ?
+      GROUP BY CASE WHEN referrer = '' THEN 'Direct' ELSE referrer END
+      ORDER BY sessions DESC LIMIT 20
+    `, retentionStart));
+    const activity = analyticsRows(this.sql.exec(`
+      SELECT e.id, e.session_id AS sessionId, s.visitor_id AS visitorId, e.event_type AS eventType,
+        e.occurred_at AS occurredAt, e.media_id AS mediaId, e.media_type AS mediaType,
+        e.title, e.season, e.episode, e.data_json AS dataJson,
+        s.country, s.region, s.city, s.browser, s.device
+      FROM events e JOIN sessions s ON s.session_id = e.session_id
+      ORDER BY e.occurred_at DESC LIMIT 80
+    `)).map(expandAnalyticsEvent);
+
+    return poolJson({
+      generatedAt: now,
+      retentionDays: 30,
+      onlineWindowSeconds: AFILM_ONLINE_WINDOW_MS / 1000,
+      overview,
+      online,
+      recent,
+      topTitles,
+      searches,
+      locations,
+      referrers,
+      activity,
+    });
+  }
+
+  sessionDetail(sessionId) {
+    const cleanSessionId = cleanAnalyticsId(sessionId, "s_");
+    if (!cleanSessionId) return poolJson({ error: "Invalid session." }, 400);
+    const session = firstAnalyticsRow(this.sql.exec(`${analyticsSessionSelect({ detailed: true })} WHERE session_id = ? LIMIT 1`, cleanSessionId));
+    if (!session) return poolJson({ error: "Session not found." }, 404);
+    const events = analyticsRows(this.sql.exec(`
+      SELECT id, session_id AS sessionId, event_type AS eventType, occurred_at AS occurredAt,
+        media_id AS mediaId, media_type AS mediaType, title, season, episode, data_json AS dataJson
+      FROM events WHERE session_id = ? ORDER BY occurred_at DESC LIMIT 50
+    `, cleanSessionId)).map(expandAnalyticsEvent).reverse();
+    return poolJson({ session, events, retentionDays: 30 });
+  }
+
+  async alarm() {
+    const cutoff = Date.now() - AFILM_RETENTION_MS;
+    this.sql.exec("DELETE FROM events WHERE occurred_at < ?", cutoff);
+    this.sql.exec("DELETE FROM sessions WHERE last_seen < ?", cutoff);
+    await this.ctx.storage.setAlarm(Date.now() + 6 * 60 * 60 * 1000);
+  }
+}
+
+function analyticsSessionSelect({ detailed = false } = {}) {
+  return `SELECT
+    session_id AS sessionId, visitor_id AS visitorId, started_at AS startedAt, last_seen AS lastSeen,
+    ended_at AS endedAt, active_seconds AS activeSeconds, path, referrer, language, timezone, viewport,
+    browser, device, ip, country, region, city, colo, continent, region_code AS regionCode,
+    postal_code AS postalCode, metro_code AS metroCode, latitude, longitude, asn,
+    as_organization AS asOrganization, http_protocol AS httpProtocol, tls_version AS tlsVersion,
+    client_tcp_rtt AS clientTcpRtt, client_quic_rtt AS clientQuicRtt, is_eu_country AS isEuCountry,
+    ${detailed ? "user_agent AS userAgent," : ""} current_media_id AS currentMediaId,
+    current_type AS currentType, current_title AS currentTitle, current_season AS currentSeason,
+    current_episode AS currentEpisode, current_time AS currentTime, duration, playing,
+    visible, focused, event_count AS eventCount, search_count AS searchCount
+  FROM sessions`;
+}
+
+function expandAnalyticsEvent(row) {
+  let data = {};
+  try { data = JSON.parse(row.dataJson || "{}"); } catch { data = {}; }
+  const { dataJson, ...event } = row;
+  return { ...event, data };
+}
+
+function analyticsRows(cursor) {
+  return Array.from(cursor || []);
+}
+
+function firstAnalyticsRow(cursor) {
+  for (const row of cursor || []) return row;
+  return null;
+}
+
+async function readAnalyticsBody(request) {
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > 16 * 1024) return null;
+  try {
+    const text = await request.text();
+    if (!text || text.length > 16 * 1024) return null;
+    const body = JSON.parse(text);
+    return body && typeof body === "object" && !Array.isArray(body) ? body : null;
+  } catch { return null; }
+}
+
+function cleanAnalyticsText(value, max = 180) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+}
+
+function cleanAnalyticsId(value, prefix) {
+  const id = cleanAnalyticsText(value, 90);
+  return id.startsWith(prefix) && /^[A-Za-z0-9_-]+$/.test(id) ? id : "";
+}
+
+function cleanAnalyticsEvent(value) {
+  const event = cleanAnalyticsText(value, 50).toLowerCase();
+  return AFILM_EVENT_TYPES.has(event) ? event : "";
+}
+
+const AFILM_EVENT_TYPES = new Set([
+  "session_start",
+  "session_end",
+  "heartbeat",
+  "visibility_hidden",
+  "visibility_visible",
+  "media_open",
+  "search_result_open",
+  "search_open",
+  "catalog_filter",
+  "catalog_load_more",
+  "media_close",
+  "player_play",
+  "player_pause",
+  "player_seeked",
+  "player_ended",
+  "player_timeupdate",
+  "player_playerstatus",
+  "player_status",
+]);
+
+function cleanAnalyticsNumber(value, min, max) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : 0;
+}
+
+function cleanAnalyticsCoordinate(value, min, max) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
+function cleanAnalyticsInteger(value, min, max) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max ? number : null;
+}
+
+function cleanAnalyticsMedia(value) {
+  if (!value || typeof value !== "object") return { mediaId: "", mediaType: "", title: "", season: null, episode: null };
+  const mediaType = value.mediaType === "tv" ? "tv" : value.mediaType === "movie" ? "movie" : "";
+  return {
+    mediaId: cleanAnalyticsText(value.mediaId, 80),
+    mediaType,
+    title: cleanAnalyticsText(value.title, 180),
+    season: mediaType === "tv" ? Math.max(1, Math.min(999, Number(value.season) || 1)) : null,
+    episode: mediaType === "tv" ? Math.max(1, Math.min(9999, Number(value.episode) || 1)) : null,
+  };
+}
+
+function cleanAnalyticsData(value) {
+  const clean = {};
+  for (const [key, item] of Object.entries(value || {}).slice(0, 20)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue;
+    if (typeof item === "boolean") clean[key] = item;
+    else if (typeof item === "number" && Number.isFinite(item)) clean[key] = Math.max(-1e9, Math.min(1e9, item));
+    else if (typeof item === "string") clean[key] = cleanAnalyticsText(item, 240);
+  }
+  return JSON.stringify(clean).slice(0, 4000);
+}
+
+function shouldStoreAnalyticsEvent(eventType) {
+  return !["heartbeat", "visibility_hidden", "visibility_visible", "player_timeupdate", "player_playerstatus"].includes(eventType);
+}
+
+function analyticsAgent(userAgent) {
+  const ua = String(userAgent || "");
+  let browser = "Unknown browser";
+  if (/Edg\//.test(ua)) browser = "Microsoft Edge";
+  else if (/OPR\//.test(ua)) browser = "Opera";
+  else if (/CriOS\//.test(ua)) browser = "Chrome iOS";
+  else if (/FxiOS\//.test(ua)) browser = "Firefox iOS";
+  else if (/Chrome\//.test(ua)) browser = "Google Chrome";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/Safari\//.test(ua)) browser = "Safari";
+  let device = "Desktop";
+  if (/iPad/.test(ua)) device = "iPad";
+  else if (/iPhone|iPod/.test(ua)) device = "iPhone";
+  else if (/Android/.test(ua)) device = /Mobile/.test(ua) ? "Android phone" : "Android tablet";
+  else if (/Mobile/.test(ua)) device = "Mobile";
+  return { browser, device };
 }
 
 function validSecret(value) {

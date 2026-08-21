@@ -20,6 +20,7 @@ import {
   Tv2,
   X,
 } from "lucide-react";
+import { mediaAnalyticsContext, useMovieAnalytics } from "@/lib/movieAnalytics";
 import {
   buildMovieShareUrl,
   buildPlayerUrl,
@@ -331,7 +332,7 @@ function CatalogSkeleton() {
   ));
 }
 
-function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
+function SearchOverlay({ open, catalog, active, onClose, onSelect, onTrack }) {
   const lenis = useLenis();
   const inputRef = useRef(null);
   const resultsRef = useRef(null);
@@ -378,7 +379,15 @@ function SearchOverlay({ open, catalog, active, onClose, onSelect }) {
 
   const shown = query.trim() ? results : catalog.slice(0, 10);
   const highlightedIndex = Math.min(highlighted, Math.max(0, shown.length - 1));
-  const choose = (media) => { onSelect(media); setQuery(""); onClose(); };
+  const choose = (media) => {
+    onTrack?.("search_result_open", {
+      query: query.trim().slice(0, 180),
+      resultId: String(media.id),
+      resultType: media.mediaType,
+      resultTitle: String(media.title || "").slice(0, 180),
+    });
+    onSelect(media); setQuery(""); onClose();
+  };
   useEffect(() => setHighlighted(0), [query, type, open]);
   useEffect(() => {
     resultsRef.current?.querySelector(`[data-result-index="${highlightedIndex}"]`)?.scrollIntoView({ block: "nearest" });
@@ -491,13 +500,14 @@ function EpisodeShelf({ media, details, onEpisode }) {
   );
 }
 
-function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory }) {
+function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, onSearch, onHistory, onTrack }) {
   const [details, setDetails] = useState({ ...media, episodes: [] });
   const [transport, setTransport] = useState({ autoPlay: true, captions: false, sequence: 0, startAt: 0 });
   const [playerStatus, setPlayerStatus] = useState({ currentTime: 0, duration: 0, muted: false, playing: true, volume: 1 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isImmersive, setIsImmersive] = useState(false);
   const lastWrite = useRef(0);
+  const lastAnalyticsWrite = useRef(0);
   const playerFrameRef = useRef(null);
   const playerShellRef = useRef(null);
   const playerStatusRef = useRef(playerStatus);
@@ -604,11 +614,23 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
         playerShellRef.current.dataset.playing = String(nextStatus.playing);
         playerShellRef.current.dataset.volume = String(nextStatus.volume);
       }
+      const eventName = String(data.data.event || "");
+      const analyticsNow = Date.now();
+      if (eventName !== "timeupdate" || analyticsNow - lastAnalyticsWrite.current >= 15_000) {
+        lastAnalyticsWrite.current = analyticsNow;
+        onTrack?.(`player_${eventName || "status"}`, {
+          currentTime,
+          duration,
+          playing: nextStatus.playing,
+          muted: nextStatus.muted,
+          volume: nextStatus.volume,
+        });
+      }
       const now = Date.now(); if (data.data.event === "timeupdate" && now - lastWrite.current < 1300) return; lastWrite.current = now;
       onHistory(saveMovieHistory({ ...media, ...details, progress: { watched: currentTime, duration } }));
     };
     window.addEventListener("message", receive); return () => window.removeEventListener("message", receive);
-  }, [details, media, onHistory, updatePlayerStatus]);
+  }, [details, media, onHistory, onTrack, updatePlayerStatus]);
   useEffect(() => {
     const syncFullscreen = () => setIsFullscreen((document.fullscreenElement
       || document.webkitFullscreenElement
@@ -791,10 +813,12 @@ function MovieExperience() {
   const sentinelRef = useRef(null);
   const footerRef = useRef(null);
   const [footerInView, setFooterInView] = useState(false);
+  const analytics = useMovieAnalytics(active);
   const openSearch = useCallback(() => {
+    analytics.track("search_open");
     setSearchOpen(true);
     window.requestAnimationFrame(() => document.querySelector("input[name='movie-search']")?.focus({ preventScroll: true }));
-  }, []);
+  }, [analytics.track]);
   const updateShareUrl = useCallback((media) => {
     const nextUrl = buildMovieShareUrl(media, window.location.href);
     if (nextUrl === window.location.href) return;
@@ -816,9 +840,10 @@ function MovieExperience() {
     try {
       const items = await fetchCatalogPage({ page: nextPage, pageSize: 24 });
       setCatalog((current) => { const seen = new Set(current.map((item) => `${item.mediaType}:${item.id}`)); return [...current, ...items.filter((item) => !seen.has(`${item.mediaType}:${item.id}`))]; });
+      analytics.track("catalog_load_more", { page: nextPage, loaded: items.length });
       setPage(nextPage); if (items.length < 12) setHasMore(false); setCatalogStatus("ready");
     } catch { setCatalogStatus("fallback"); } finally { loadingMore.current = false; }
-  }, [hasMore, page]);
+  }, [analytics.track, hasMore, page]);
 
   useEffect(() => { const sentinel = sentinelRef.current; if (!sentinel) return undefined; const observer = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) loadMore(); }, { rootMargin: "500px 0px" }); observer.observe(sentinel); return () => observer.disconnect(); }, [loadMore]);
   useEffect(() => { const footer = footerRef.current; if (!footer) return undefined; const observer = new IntersectionObserver(([entry]) => setFooterInView(entry.isIntersecting), { threshold: 0.02 }); observer.observe(footer); return () => observer.disconnect(); }, [active]);
@@ -857,8 +882,8 @@ function MovieExperience() {
     const next = { ...saved, ...media, season: media.mediaType === "tv" ? media.season || saved?.season || 1 : undefined, episode: media.mediaType === "tv" ? media.episode || saved?.episode || 1 : undefined, progress: sameEpisode ? media.progress || saved?.progress : media.progress };
     setActive(next); setHistory(saveMovieHistory(next)); updateShareUrl(next);
   };
-  const changeView = (nextView) => { setView(nextView); setHeroIndex(0); lenis?.scrollTo("#catalog", { offset: -110, duration: 1.1 }); };
-  const closePlayer = () => { setActive(null); updateShareUrl(null); };
+  const changeView = (nextView) => { analytics.track("catalog_filter", { view: nextView }); setView(nextView); setHeroIndex(0); lenis?.scrollTo("#catalog", { offset: -110, duration: 1.1 }); };
+  const closePlayer = () => { analytics.track("media_close", mediaAnalyticsContext(active) || {}); setActive(null); updateShareUrl(null); };
   const goHome = () => { if (active) closePlayer(); else lenis?.scrollTo(0, { duration: 1.1 }); };
 
   return (
@@ -867,7 +892,7 @@ function MovieExperience() {
       <ProgressiveEdgeBlur edge="bottom" hidden={!active && footerInView} />
       <AnimatePresence mode="wait">
         {active ? (
-          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={closePlayer} onSearch={openSearch} onHistory={setHistory} />
+          <PlayerPage key={`${active.mediaType}-${active.id}`} media={active} catalog={catalog} history={history} searchOpen={searchOpen} onSelect={select} onClose={closePlayer} onSearch={openSearch} onHistory={setHistory} onTrack={analytics.track} />
         ) : (
           <motion.div key="catalog" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <SecretHeader view={view} onView={changeView} onSearch={openSearch} onHome={goHome} />
@@ -877,12 +902,39 @@ function MovieExperience() {
               <div className="movie-catalog-grid">{catalogStatus === "loading" ? <CatalogSkeleton /> : visibleCatalog.map((media, index) => <PosterCard key={`${media.mediaType}-${media.id}`} media={media} index={index} progress={savedItemFor(history, media)?.progress} onSelect={select} />)}</div>
               <div ref={sentinelRef} className="movie-catalog-sentinel">{hasMore ? <button type="button" onClick={loadMore} disabled={catalogStatus === "more"}>{catalogStatus === "more" ? <LoaderCircle {...iconProps} className="animate-spin" /> : <ArrowDown {...iconProps} />}{catalogStatus === "more" ? "Loading titles" : "Load more"}</button> : <span>You reached the end of the room.</span>}</div>
             </main>
-            <footer ref={footerRef} className="movie-footer"><span>AFilm</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p><span>Local progress · No account</span></footer>
+            <footer ref={footerRef} className="movie-footer"><span>AFilm</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p><button type="button" onClick={analytics.resetConsent}>Analytics settings</button></footer>
           </motion.div>
         )}
       </AnimatePresence>
-      <SearchOverlay open={searchOpen} catalog={catalog} active={active} onClose={() => setSearchOpen(false)} onSelect={select} />
+      <SearchOverlay open={searchOpen} catalog={catalog} active={active} onClose={() => setSearchOpen(false)} onSelect={select} onTrack={analytics.track} />
+      <AnalyticsConsent consent={analytics.consent} onChoice={analytics.setConsent} />
     </section>
+  );
+}
+
+function AnalyticsConsent({ consent, onChoice }) {
+  return (
+    <AnimatePresence>
+      {consent === "pending" && (
+        <motion.aside
+          className="movie-analytics-consent"
+          initial={{ opacity: 0, y: 24, filter: "blur(8px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          exit={{ opacity: 0, y: 18, filter: "blur(6px)" }}
+          transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+          aria-label="Analytics choice"
+        >
+          <div>
+            <span>Private analytics</span>
+            <p>Allow AFilm to record visits, watch activity, searches, device details, IP address and approximate location for 30 days.</p>
+          </div>
+          <div className="movie-analytics-consent__actions">
+            <button type="button" onClick={() => onChoice("essential")}>Only essential</button>
+            <button type="button" onClick={() => onChoice("allow")}>Allow analytics</button>
+          </div>
+        </motion.aside>
+      )}
+    </AnimatePresence>
   );
 }
 

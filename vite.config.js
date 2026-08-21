@@ -340,15 +340,26 @@ function seoStaticPages() {
 
       // App-only routes still need a physical HTML entry point on GitHub Pages,
       // but stay out of the SEO catalog and sitemap.
-      const appOnlyPages = [{
-        path: "/movie",
-        type: "website",
-        title: "AFilm",
-        heading: "AFilm",
-        description: "Search movies and TV series by title, IMDb ID, or TMDB ID and open them in a focused embedded player.",
-        intro: "A focused movie and TV search with direct player access and progress stored on this device.",
-        relatedPaths: [],
-      }];
+      const appOnlyPages = [
+        {
+          path: "/movie",
+          type: "website",
+          title: "AFilm",
+          heading: "AFilm",
+          description: "Search movies and TV series by title, IMDb ID, or TMDB ID and open them in a focused embedded player.",
+          intro: "A focused movie and TV search with direct player access and progress stored on this device.",
+          relatedPaths: [],
+        },
+        {
+          path: "/movie/admin",
+          type: "website",
+          title: "AFilm Analytics",
+          heading: "AFilm Analytics",
+          description: "Private AFilm audience and playback analytics.",
+          intro: "Private analytics access.",
+          relatedPaths: [],
+        },
+      ];
       for (const page of appOnlyPages) {
         const destination = join(outDir, page.path.slice(1), "index.html");
         await mkdir(join(destination, ".."), { recursive: true });
