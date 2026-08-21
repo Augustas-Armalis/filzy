@@ -347,7 +347,7 @@ export default function MovieAdmin() {
 
         <section id="live" className="afilm-admin-panel afilm-admin-panel--live">
           <div className="afilm-admin-panel__heading"><div><p><Eye size={14} aria-hidden="true" /> Live Room</p><h2>Watching Now</h2></div><span>{data?.online?.length || 0} active</span></div>
-          <div className="afilm-live-list">{data?.online?.length ? data.online.map((session) => <LiveSession key={session.sessionId} session={session} onOpen={openProfile} />) : <div className="afilm-admin-empty"><Activity size={20} aria-hidden="true" /><p>The room is quiet.</p><span>New consenting visitors appear here within a few seconds.</span></div>}</div>
+          <div className="afilm-live-list">{data?.online?.length ? data.online.map((session) => <LiveSession key={session.sessionId} session={session} onOpen={openProfile} />) : <div className="afilm-admin-empty"><Activity size={20} aria-hidden="true" /><p>The room is quiet.</p><span>New visitors appear here within a few seconds.</span></div>}</div>
         </section>
 
         <div className="afilm-admin-columns afilm-admin-columns--content">

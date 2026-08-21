@@ -902,39 +902,12 @@ function MovieExperience() {
               <div className="movie-catalog-grid">{catalogStatus === "loading" ? <CatalogSkeleton /> : visibleCatalog.map((media, index) => <PosterCard key={`${media.mediaType}-${media.id}`} media={media} index={index} progress={savedItemFor(history, media)?.progress} onSelect={select} />)}</div>
               <div ref={sentinelRef} className="movie-catalog-sentinel">{hasMore ? <button type="button" onClick={loadMore} disabled={catalogStatus === "more"}>{catalogStatus === "more" ? <LoaderCircle {...iconProps} className="animate-spin" /> : <ArrowDown {...iconProps} />}{catalogStatus === "more" ? "Loading titles" : "Load more"}</button> : <span>You reached the end of the room.</span>}</div>
             </main>
-            <footer ref={footerRef} className="movie-footer"><span>AFilm</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p><button type="button" onClick={analytics.resetConsent}>Analytics settings</button></footer>
+            <footer ref={footerRef} className="movie-footer"><span>AFilm</span><p>Availability is provided by the selected embed service. Only play media you are authorized to access.</p></footer>
           </motion.div>
         )}
       </AnimatePresence>
       <SearchOverlay open={searchOpen} catalog={catalog} active={active} onClose={() => setSearchOpen(false)} onSelect={select} onTrack={analytics.track} />
-      <AnalyticsConsent consent={analytics.consent} onChoice={analytics.setConsent} />
     </section>
-  );
-}
-
-function AnalyticsConsent({ consent, onChoice }) {
-  return (
-    <AnimatePresence>
-      {consent === "pending" && (
-        <motion.aside
-          className="movie-analytics-consent"
-          initial={{ opacity: 0, y: 24, filter: "blur(8px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, y: 18, filter: "blur(6px)" }}
-          transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-          aria-label="Analytics choice"
-        >
-          <div>
-            <span>Private analytics</span>
-            <p>Allow AFilm to record visits, watch activity, searches, device details, IP address and approximate location for 30 days.</p>
-          </div>
-          <div className="movie-analytics-consent__actions">
-            <button type="button" onClick={() => onChoice("essential")}>Only essential</button>
-            <button type="button" onClick={() => onChoice("allow")}>Allow analytics</button>
-          </div>
-        </motion.aside>
-      )}
-    </AnimatePresence>
   );
 }
 

@@ -1174,30 +1174,6 @@ html.movie-player-immersive-open .movie-player-main { z-index: 120; }
 .movie-more { padding-bottom: 70px; }
 .movie-catalog-grid--compact { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 
-.movie-analytics-consent {
-  position: fixed;
-  z-index: 90;
-  right: max(18px, env(safe-area-inset-right));
-  bottom: max(18px, env(safe-area-inset-bottom));
-  display: grid;
-  width: min(520px, calc(100vw - 36px));
-  gap: 18px;
-  padding: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 22px;
-  background: rgba(7, 7, 7, 0.9);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  -webkit-backdrop-filter: blur(24px) saturate(1.1);
-  backdrop-filter: blur(24px) saturate(1.1);
-}
-.movie-analytics-consent span { color: #fff; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
-.movie-analytics-consent p { max-width: 440px; margin-top: 7px; color: rgba(255, 255, 255, 0.58); font-size: 13px; line-height: 1.5; letter-spacing: -0.012em; }
-.movie-analytics-consent__actions { display: flex; justify-content: flex-end; gap: 8px; }
-.movie-analytics-consent__actions button { min-height: 42px; padding: 0 17px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.72); font-size: 12px; transition: 180ms ease; }
-.movie-analytics-consent__actions button:hover { border-color: rgba(255, 255, 255, 0.34); color: #fff; transform: translateY(-1px); }
-.movie-analytics-consent__actions button:last-child { border-color: #fff; background: #fff; color: #000; }
-.movie-analytics-consent__actions button:last-child:hover { background: rgba(255, 255, 255, 0.88); }
-
 @supports not ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
   .movie-glass, .movie-secondary-button, .movie-poster-card__hover, .movie-search-overlay__backdrop { background: rgba(15, 15, 15, 0.96); }
 }
@@ -1302,9 +1278,6 @@ html.movie-player-immersive-open .movie-player-main { z-index: 120; }
   .movie-episode-fallback button { flex: 1; }
   .movie-episode-fallback button:nth-last-child(2) { margin-left: 0; }
   .movie-catalog-grid--compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .movie-analytics-consent { right: 10px; bottom: max(10px, env(safe-area-inset-bottom)); width: calc(100vw - 20px); gap: 15px; padding: 18px; border-radius: 18px; }
-  .movie-analytics-consent__actions { display: grid; grid-template-columns: 1fr 1fr; }
-  .movie-analytics-consent__actions button { padding: 0 10px; }
 }
 
 @media (max-width: 360px) {

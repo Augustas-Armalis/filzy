@@ -3,22 +3,10 @@ import {
   createAnalyticsId,
   mediaAnalyticsContext,
   postMovieAnalytics,
-  readMovieAnalyticsConsent,
 } from "@/lib/movieAnalytics";
-
-function storageWith(value) {
-  return { getItem: vi.fn(() => value) };
-}
 
 describe("movie analytics helpers", () => {
   afterEach(() => vi.unstubAllGlobals());
-
-  it("requires an explicit analytics choice", () => {
-    expect(readMovieAnalyticsConsent(storageWith(null))).toBe("pending");
-    expect(readMovieAnalyticsConsent(storageWith("allow"))).toBe("allow");
-    expect(readMovieAnalyticsConsent(storageWith("essential"))).toBe("essential");
-    expect(readMovieAnalyticsConsent(storageWith("unexpected"))).toBe("pending");
-  });
 
   it("creates scoped, storage-safe identifiers", () => {
     expect(createAnalyticsId("s_")).toMatch(/^s_[A-Za-z0-9-]+$/);

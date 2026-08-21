@@ -402,7 +402,7 @@ export class BeamRoom {
 const AFILM_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const AFILM_ONLINE_WINDOW_MS = 45_000;
 
-/** One SQLite-backed Durable Object stores AFilm's consented audience events.
+/** One SQLite-backed Durable Object stores AFilm's private audience events.
  * Raw sessions and events are automatically removed after 30 days. */
 export class AFilmAnalytics {
   constructor(ctx, env) {

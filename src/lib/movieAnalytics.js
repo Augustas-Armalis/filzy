@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
-export const MOVIE_ANALYTICS_CONSENT_KEY = "afilm-analytics-consent-v1";
 export const MOVIE_ANALYTICS_VISITOR_KEY = "afilm-analytics-visitor-v1";
 export const MOVIE_ANALYTICS_SESSION_KEY = "afilm-analytics-session-v1";
 export const MOVIE_ANALYTICS_ADMIN_TOKEN_KEY = "afilm-admin-token-v1";
@@ -13,11 +12,6 @@ export function resolveMovieAnalyticsApi() {
   if (configured) return configured;
   if (import.meta.env.PROD) return MOVIE_ANALYTICS_API_DEFAULT;
   return "";
-}
-
-export function readMovieAnalyticsConsent(storage = window.localStorage) {
-  const value = storage.getItem(MOVIE_ANALYTICS_CONSENT_KEY);
-  return value === "allow" || value === "essential" ? value : "pending";
 }
 
 export function createAnalyticsId(prefix = "") {
@@ -72,7 +66,6 @@ export async function postMovieAnalytics(api, payload, { beacon = false } = {}) 
 
 export function useMovieAnalytics(activeMedia) {
   const api = resolveMovieAnalyticsApi();
-  const [consent, setConsentState] = useState(readMovieAnalyticsConsent);
   const activeRef = useRef(activeMedia);
   const identifiersRef = useRef(null);
   const lastHeartbeatRef = useRef(Date.now());
@@ -97,7 +90,7 @@ export function useMovieAnalytics(activeMedia) {
   }, []);
 
   const track = useCallback((eventType, eventData = {}, options = {}) => {
-    if (consent !== "allow" || !api) return Promise.resolve(false);
+    if (!api) return Promise.resolve(false);
     const now = Date.now();
     const ids = identifiers();
     return postMovieAnalytics(api, {
@@ -110,31 +103,10 @@ export function useMovieAnalytics(activeMedia) {
       client: clientAnalyticsContext(),
       data: eventData,
     }, options);
-  }, [api, consent, identifiers]);
-
-  const setConsent = useCallback((choice) => {
-    const next = choice === "allow" ? "allow" : "essential";
-    window.localStorage.setItem(MOVIE_ANALYTICS_CONSENT_KEY, next);
-    if (next !== "allow") {
-      window.localStorage.removeItem(MOVIE_ANALYTICS_VISITOR_KEY);
-      window.sessionStorage.removeItem(MOVIE_ANALYTICS_SESSION_KEY);
-      identifiersRef.current = null;
-    }
-    setConsentState(next);
-  }, []);
-
-  const resetConsent = useCallback(() => {
-    if (consent === "allow") track("session_end", {}, { beacon: true });
-    window.localStorage.removeItem(MOVIE_ANALYTICS_CONSENT_KEY);
-    window.localStorage.removeItem(MOVIE_ANALYTICS_VISITOR_KEY);
-    window.sessionStorage.removeItem(MOVIE_ANALYTICS_SESSION_KEY);
-    identifiersRef.current = null;
-    startedRef.current = false;
-    setConsentState("pending");
-  }, [consent, track]);
+  }, [api, identifiers]);
 
   useEffect(() => {
-    if (consent !== "allow" || !api) return undefined;
+    if (!api) return undefined;
     if (!startedRef.current) {
       startedRef.current = true;
       lastHeartbeatRef.current = Date.now();
@@ -166,12 +138,12 @@ export function useMovieAnalytics(activeMedia) {
       window.removeEventListener("pagehide", finish);
       finish();
     };
-  }, [api, consent, track]);
+  }, [api, track]);
 
   useEffect(() => {
-    if (consent !== "allow" || !activeMedia?.id) return;
+    if (!activeMedia?.id) return;
     track("media_open", mediaAnalyticsContext(activeMedia));
-  }, [activeMedia?.episode, activeMedia?.id, activeMedia?.mediaType, activeMedia?.season, consent, track]);
+  }, [activeMedia?.episode, activeMedia?.id, activeMedia?.mediaType, activeMedia?.season, track]);
 
-  return { api, consent, resetConsent, setConsent, track };
+  return { api, track };
 }
