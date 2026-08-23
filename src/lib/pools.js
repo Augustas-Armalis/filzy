@@ -47,7 +47,7 @@ export function closePool(id, ownerSecret) {
 }
 
 export function addPoolTransfer(id, transfer, items) {
-  const transferId = hostedTransferId(transfer.transferUrl);
+  const transferId = transfer.access?.transferId || hostedTransferId(transfer.transferUrl);
   const files = flattenTransferItems(items).map((file) => ({ name: file.name, size: file.size, kind: file.type || "file" }));
   return poolRequest(`/pool/${encodeURIComponent(id)}/batches`, {
     method: "POST",

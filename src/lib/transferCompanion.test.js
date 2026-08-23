@@ -15,8 +15,8 @@ describe("hosted transfer helpers", () => {
   });
 
   it("rejects transfers above the public size limit before uploading", async () => {
-    await expect(startHostedTransfer({ items: [{ kind: "file", file: { name: "large.bin", size: 25 * 1024 ** 3 + 1 } }] }))
-      .rejects.toThrow("up to 25 GB");
+    await expect(startHostedTransfer({ items: [{ kind: "file", file: { name: "large.bin", size: 900 * 1024 ** 2 + 1 } }] }))
+      .rejects.toThrow("up to 900 MB");
   });
 
   it("rejects invalid burn-after-download limits before uploading", async () => {

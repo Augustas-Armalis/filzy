@@ -21,7 +21,7 @@ async function request(path, options = {}) {
 
 export async function createDropShare({ transfer, items, note, expiresInDays, password = "", maxDownloads = 0 }) {
   const id = shortId();
-  const transferId = hostedTransferId(transfer.transferUrl);
+  const transferId = transfer.access?.transferId || hostedTransferId(transfer.transferUrl);
   const files = flattenTransferItems(items).map((file) => ({ name: file.name, size: file.size, kind: file.type || "file" }));
   await request(`/drop/${id}/init`, {
     method: "POST",

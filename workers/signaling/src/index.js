@@ -31,6 +31,13 @@ export default {
     if (url.pathname === "/turn") return cors(await turnCreds(env));
     if (url.pathname.startsWith("/transfer/")) return cors(await proxyTransferApi(request, url, env));
 
+    const storeMatch = url.pathname.match(/^\/store\/([A-Za-z0-9_-]{20,120})(?:\/.*)?$/);
+    if (storeMatch) {
+      if (!["POST", "PUT", "DELETE"].includes(request.method)) return cors(poolJson({ error: "Not found." }, 404));
+      const id = env.BEAM_ROOMS.idFromName(`stored-${storeMatch[1]}`);
+      return cors(await env.BEAM_ROOMS.get(id).fetch(request));
+    }
+
     const poolMatch = url.pathname.match(/^\/pool\/([A-Za-z0-9_-]+)(?:\/.*)?$/);
     if (poolMatch) {
       const id = env.BEAM_ROOMS.idFromName(`pool-${poolMatch[1]}`);
@@ -79,7 +86,7 @@ function json(obj) {
 function cors(res) {
   const headers = new Headers(res.headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "*");
   headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition");
   return new Response(res.body, {
@@ -174,6 +181,7 @@ export class BeamRoom {
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/store/")) return this.storeRequest(request, url);
     if (url.pathname.startsWith("/pool/")) return this.poolRequest(request, url);
     if (url.pathname.startsWith("/drop/")) return this.dropRequest(request, url);
     const self = url.searchParams.get("self");
@@ -204,7 +212,7 @@ export class BeamRoom {
       const batch = state.batches.find((candidate) => candidate.id === fileMatch[1]);
       if (!batch) return poolJson({ error: "File not found." }, 404);
       if (!await transferAccessAllowed(state, url.searchParams.get("access"))) return poolJson({ error: "Password required." }, 401);
-      return proxyTransferFile(request, batch.access, Number(fileMatch[2]), batch.files);
+      return proxyTransferFile(request, batch.access, Number(fileMatch[2]), batch.files, this.env);
     }
     if (request.method === "GET" && action === "read") {
       if (!state) return poolJson({ error: "Pool not found." }, 404);
@@ -286,7 +294,7 @@ export class BeamRoom {
       if (!state) return poolJson({ error: "Transfer not found." }, 404);
       if (state.expiresAt <= Date.now()) return poolJson({ error: "This transfer has expired." }, 410);
       if (!await transferAccessAllowed(state, url.searchParams.get("access"))) return poolJson({ error: "Password required." }, 401);
-      return proxyTransferFile(request, state.access, Number(fileMatch[1]), state.files);
+      return proxyTransferFile(request, state.access, Number(fileMatch[1]), state.files, this.env);
     }
     if (request.method === "GET") {
       if (!state) return poolJson({ error: "Transfer not found." }, 404);
@@ -336,6 +344,135 @@ export class BeamRoom {
 
   async alarm() {
     await this.ctx.storage.deleteAll();
+  }
+
+  async storeRequest(request, url) {
+    const transferId = (url.pathname.match(/^\/store\/([A-Za-z0-9_-]{20,120})/) || [])[1] || "";
+    const fileMatch = url.pathname.match(/^\/store\/[A-Za-z0-9_-]+\/files\/(\d+)$/);
+    const chunkMatch = url.pathname.match(/^\/store\/[A-Za-z0-9_-]+\/files\/(\d+)\/chunks\/(\d+)$/);
+    const action = url.pathname.endsWith("/init") ? "init" : url.pathname.endsWith("/complete") ? "complete" : "";
+    const state = await this.ctx.storage.get("storedTransfer");
+
+    if (["GET", "HEAD"].includes(request.method) && fileMatch) {
+      if (!state || state.transferId !== transferId || !state.complete) return poolJson({ error: "File not found." }, 404);
+      if (state.expiresAt <= Date.now()) {
+        await this.ctx.storage.deleteAll();
+        return poolJson({ error: "This file has expired." }, 410);
+      }
+      return this.storedFileResponse(request, state, Number(fileMatch[1]));
+    }
+
+    if (request.method === "POST" && action === "init") {
+      if (state) return poolJson({ error: "Upload already exists." }, 409);
+      const body = await safePoolJson(request);
+      const days = Number(body?.expiresInDays);
+      const files = Array.isArray(body?.files) ? body.files.slice(0, 500).map((file) => ({
+        name: cleanPoolText(file?.name, 220) || "file",
+        size: Math.max(0, Math.floor(Number(file?.size) || 0)),
+        kind: cleanPoolText(file?.kind, 100) || "application/octet-stream",
+      })) : [];
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+      if (!validSecret(body?.ownerSecret) || ![1, 7].includes(days) || !files.length || totalBytes > STORED_TRANSFER_MAX_BYTES) {
+        return poolJson({ error: "Invalid upload settings." }, 400);
+      }
+      const storedTransfer = {
+        transferId,
+        ownerHash: await hashSecret(body.ownerSecret),
+        createdAt: Date.now(),
+        expiresAt: Date.now() + days * 24 * 60 * 60 * 1000,
+        complete: false,
+        files,
+      };
+      await this.ctx.storage.put("storedTransfer", storedTransfer);
+      await this.ctx.storage.setAlarm(storedTransfer.expiresAt);
+      return poolJson({ ok: true, transferId, chunkSize: STORED_CHUNK_BYTES }, 201);
+    }
+
+    if (!state || state.transferId !== transferId) return poolJson({ error: "Upload not found." }, 404);
+    if (!validSecret(request.headers.get("x-owner-secret")) || await hashSecret(request.headers.get("x-owner-secret")) !== state.ownerHash) {
+      return poolJson({ error: "Upload access denied." }, 403);
+    }
+    if (state.expiresAt <= Date.now()) return poolJson({ error: "This upload has expired." }, 410);
+
+    if (request.method === "DELETE" && url.pathname === `/store/${transferId}`) {
+      await this.ctx.storage.deleteAll();
+      return poolJson({ ok: true });
+    }
+
+    if (request.method === "PUT" && chunkMatch) {
+      if (state.complete) return poolJson({ error: "Upload is already complete." }, 409);
+      const fileIndex = Number(chunkMatch[1]);
+      const partIndex = Number(chunkMatch[2]);
+      const file = state.files[fileIndex];
+      if (!file) return poolJson({ error: "File not found." }, 404);
+      const partCount = Math.max(1, Math.ceil(file.size / STORED_CHUNK_BYTES));
+      if (!Number.isInteger(partIndex) || partIndex < 0 || partIndex >= partCount) return poolJson({ error: "Invalid upload part." }, 400);
+      const expectedBytes = partIndex === partCount - 1 ? file.size - partIndex * STORED_CHUNK_BYTES : STORED_CHUNK_BYTES;
+      const declaredBytes = Number(request.headers.get("content-length") || -1);
+      if (declaredBytes > STORED_CHUNK_BYTES || declaredBytes !== -1 && declaredBytes !== expectedBytes) {
+        return poolJson({ error: "Upload part has the wrong size." }, 400);
+      }
+      const bytes = await request.arrayBuffer();
+      if (bytes.byteLength !== expectedBytes) return poolJson({ error: "Upload part has the wrong size." }, 400);
+      await this.ctx.storage.put(storedChunkKey(fileIndex, partIndex), bytes);
+      return poolJson({ ok: true, part: partIndex });
+    }
+
+    if (request.method === "POST" && action === "complete") {
+      for (let fileIndex = 0; fileIndex < state.files.length; fileIndex += 1) {
+        const file = state.files[fileIndex];
+        const partCount = Math.max(1, Math.ceil(file.size / STORED_CHUNK_BYTES));
+        const chunks = await this.ctx.storage.list({ prefix: `chunk:${fileIndex}:` });
+        if (chunks.size !== partCount) return poolJson({ error: `Upload is missing part of ${file.name}.` }, 409);
+        let size = 0;
+        for (const value of chunks.values()) size += storedBytes(value).byteLength;
+        if (size !== file.size) return poolJson({ error: `Upload is incomplete for ${file.name}.` }, 409);
+      }
+      state.complete = true;
+      await this.ctx.storage.put("storedTransfer", state);
+      return poolJson({ ok: true, transferId });
+    }
+
+    return poolJson({ error: "Not found." }, 404);
+  }
+
+  async storedFileResponse(request, state, fileIndex) {
+    const file = state.files[fileIndex];
+    if (!file) return poolJson({ error: "File not found." }, 404);
+    const range = storedRange(request.headers.get("range"), file.size);
+    if (!range) return new Response(null, { status: 416, headers: { "content-range": `bytes */${file.size}` } });
+    const { start, end, partial } = range;
+    const length = end >= start ? end - start + 1 : 0;
+    const headers = new Headers({
+      "accept-ranges": "bytes",
+      "content-type": file.kind || "application/octet-stream",
+      "content-length": String(length),
+      "cache-control": "private, no-store",
+    });
+    if (partial) headers.set("content-range", `bytes ${start}-${end}/${file.size}`);
+    if (request.method === "HEAD" || length === 0) return new Response(null, { status: partial ? 206 : 200, headers });
+
+    let position = start;
+    const storage = this.ctx.storage;
+    const body = new ReadableStream({
+      async pull(controller) {
+        if (position > end) {
+          controller.close();
+          return;
+        }
+        const partIndex = Math.floor(position / STORED_CHUNK_BYTES);
+        const chunk = storedBytes(await storage.get(storedChunkKey(fileIndex, partIndex)));
+        if (!chunk.byteLength) {
+          controller.error(new Error("Stored upload part is missing."));
+          return;
+        }
+        const offset = position - partIndex * STORED_CHUNK_BYTES;
+        const count = Math.min(chunk.byteLength - offset, end - position + 1);
+        controller.enqueue(chunk.slice(offset, offset + count));
+        position += count;
+      },
+    });
+    return new Response(body, { status: partial ? 206 : 200, headers });
   }
 
   webSocketMessage(ws, raw) {
@@ -879,6 +1016,14 @@ function publicDrop(drop, unlocked = false) {
 function cleanTransferAccess(value, files) {
   if (!value || typeof value !== "object") return null;
   const entries = Array.isArray(value.files) ? value.files : [];
+  if (value.provider === "filzy") {
+    const transferId = String(value.transferId || "");
+    const cleaned = entries.map((entry) => ({
+      name: String(entry?.name || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 500),
+    }));
+    if (!validSecret(transferId) || cleaned.length !== files.length || cleaned.some((entry) => !entry.name)) return null;
+    return { provider: "filzy", transferId, files: cleaned };
+  }
   if (value.provider !== "temporary" || entries.length !== files.length) return null;
   const cleaned = entries.map((entry) => ({
     id: String(entry?.id || ""),
@@ -888,11 +1033,10 @@ function cleanTransferAccess(value, files) {
   return { provider: "temporary", files: cleaned };
 }
 
-async function proxyTransferFile(request, access, index, files) {
+async function proxyTransferFile(request, access, index, files, env) {
   const entry = access?.files?.[index];
   const publicFile = files?.[index];
   if (!entry || !publicFile || !Number.isInteger(index) || index < 0) return poolJson({ error: "File not found." }, 404);
-  const upstreamUrl = `https://storage.to/${encodeURIComponent(entry.id)}/download`;
   const requestHeaders = new Headers();
   for (const name of ["range", "if-match", "if-none-match", "if-modified-since", "if-unmodified-since"]) {
     const value = request.headers.get(name);
@@ -901,11 +1045,20 @@ async function proxyTransferFile(request, access, index, files) {
 
   let upstream;
   try {
-    upstream = await fetch(upstreamUrl, {
-      method: request.method === "HEAD" ? "HEAD" : "GET",
-      headers: requestHeaders,
-      redirect: "follow",
-    });
+    if (access.provider === "filzy" && validSecret(access.transferId)) {
+      const id = env.BEAM_ROOMS.idFromName(`stored-${access.transferId}`);
+      upstream = await env.BEAM_ROOMS.get(id).fetch(new Request(`https://filzy.internal/store/${access.transferId}/files/${index}`, {
+        method: request.method === "HEAD" ? "HEAD" : "GET",
+        headers: requestHeaders,
+      }));
+    } else {
+      const upstreamUrl = `https://storage.to/${encodeURIComponent(entry.id)}/download`;
+      upstream = await fetch(upstreamUrl, {
+        method: request.method === "HEAD" ? "HEAD" : "GET",
+        headers: requestHeaders,
+        redirect: "follow",
+      });
+    }
   } catch {
     return poolJson({ error: "The download could not be reached." }, 502);
   }
@@ -921,6 +1074,40 @@ async function proxyTransferFile(request, access, index, files) {
   headers.set("content-disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
   headers.set("cache-control", "private, no-store");
   return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
+}
+
+const STORED_CHUNK_BYTES = 1024 ** 2;
+const STORED_TRANSFER_MAX_BYTES = 900 * 1024 ** 2;
+
+function storedChunkKey(fileIndex, partIndex) {
+  return `chunk:${fileIndex}:${String(partIndex).padStart(6, "0")}`;
+}
+
+function storedBytes(value) {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  return new Uint8Array();
+}
+
+function storedRange(header, size) {
+  if (!header) return { start: 0, end: size - 1, partial: false };
+  const match = String(header).match(/^bytes=(\d*)-(\d*)$/);
+  if (!match || !size) return null;
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isInteger(suffix) || suffix <= 0) return null;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start >= size || end < start) return null;
+    end = Math.min(end, size - 1);
+  }
+  return { start, end, partial: true };
 }
 
 const TRANSFER_API_ROUTES = [

@@ -207,7 +207,7 @@ export default function Home() {
                   onOpen={openPicker}
                   Icon={Plus}
                   title="Add files"
-                  subtitle={activeId === "pool" ? "Add now, or open an empty pool" : "Share up to 25 GB with one link"}
+                  subtitle={activeId === "pool" ? "Add now, or open an empty pool" : "Share up to 900 MB with one link"}
                   dragTitle="Drop files to add"
                 />
               )}
