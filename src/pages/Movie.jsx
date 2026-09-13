@@ -521,15 +521,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
     sub: transport.captions ? "en" : "off",
     theme: "FFFFFF",
   }), [media.episode, media.id, media.mediaType, media.season, transport.autoPlay, transport.captions, transport.startAt]);
-  const directPlayerUrl = useMemo(() => buildPlayerUrl(media, {
-    autoPlay: true,
-    poster: true,
-    startAt: playerStatus.currentTime,
-    sub: "off",
-    theme: "FFFFFF",
-    title: true,
-  }), [media.episode, media.id, media.mediaType, media.season, playerStatus.currentTime]);
-
   const updatePlayerStatus = useCallback((patch) => {
     playerStatusRef.current = { ...playerStatusRef.current, ...patch };
     setPlayerStatus(playerStatusRef.current);
@@ -732,6 +723,18 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
               <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen || isImmersive ? "Exit fullscreen" : "Enter fullscreen"} aria-pressed={isFullscreen || isImmersive} title={isFullscreen || isImmersive ? "Exit fullscreen" : "Fullscreen"}>
                 {isFullscreen || isImmersive ? <Minimize2 {...iconProps} /> : <Maximize2 {...iconProps} />}
               </button>
+              <a
+                href={`${VIDUP_ORIGIN}/#player`}
+                className="movie-player-provider-link"
+                onClick={() => {
+                  navigator.clipboard?.writeText(String(media.id)).catch(() => {});
+                  onTrack?.("provider_open", mediaAnalyticsContext(media) || {});
+                }}
+                aria-label={`Open Vidup and copy ${details.title || media.title} ID ${media.id}`}
+                title="Open Vidup · ID copied"
+              >
+                <ExternalLink {...iconProps} />
+              </a>
             </div>
             <RatingMark rating={details.rating} detailed />
           </div>
@@ -772,19 +775,6 @@ function PlayerPage({ media, catalog, history, searchOpen, onSelect, onClose, on
               <div className="movie-player-shell__reflection" aria-hidden="true" />
             </div>
           </div>
-        </div>
-        <div className="movie-player-direct-access">
-          <span>Prefer the provider page?</span>
-          <a
-            href={directPlayerUrl}
-            onClick={() => onTrack?.("provider_open", mediaAnalyticsContext(media) || {})}
-            rel="noreferrer"
-            aria-label={`Open ${details.title || media.title} directly on Vidup without ads`}
-          >
-            <span>No ads</span>
-            <small>Open direct player</small>
-            <ExternalLink size={13} strokeWidth={1.7} absoluteStrokeWidth aria-hidden="true" />
-          </a>
         </div>
         <section className="movie-player-about">
           <div className="movie-player-about__overview"><p>{details.detail || "Selected from the private catalog."}</p></div>
